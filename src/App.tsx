@@ -241,6 +241,9 @@ export default function App() {
   }
   /* ---------- END ADDED ---------- */
 
+  // ---------- NEW: collapse state for roster panel ----------
+  const [rosterCollapsed, setRosterCollapsed] = useState(true);
+
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
       <header className="sticky top-0 z-10 bg-white border-b">
@@ -270,8 +273,25 @@ export default function App() {
         </nav>
       </header>
 
+      {/* ---------- REPLACED MAIN TO SUPPORT COLLAPSIBLE ROSTER + WIDE SEATING ---------- */}
       <main className="mx-auto max-w-6xl px-4 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <section className="lg:col-span-7">
+        {/* Collapsed roster header bar (shown only when collapsed) */}
+        {rosterCollapsed && (
+          <section className="lg:col-span-12">
+            <div className="bg-white rounded-2xl shadow border px-4 py-2 flex items-center justify-between">
+              <h2 className="text-xl font-semibold">{state.titles[active]} — Roster</h2>
+              <button
+                onClick={() => setRosterCollapsed(false)}
+                className="px-3 py-1.5 rounded-xl border shadow-sm hover:bg-gray-50"
+              >
+                Show
+              </button>
+            </div>
+          </section>
+        )}
+
+        {/* Seating — expands to full width when roster is collapsed */}
+        <section className={rosterCollapsed ? "lg:col-span-12" : "lg:col-span-7"}>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-xl font-semibold">{state.titles[active]} — Seating</h2>
             <div className="flex items-center gap-2">
@@ -302,36 +322,48 @@ export default function App() {
           </div>
         </section>
 
-        <section className="lg:col-span-5">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-xl font-semibold">{state.titles[active]} — Roster</h2>
-            <button onClick={()=>addStudent(active)} className="px-3 py-1.5 rounded-xl border">Add Student</button>
-          </div>
-          <div className="bg-white rounded-2xl shadow border overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-100"><tr><th className="p-2">#</th><th className="p-2">Name</th><th className="p-2">Photo URL</th><th className="p-2">Actions</th></tr></thead>
-              <tbody>
-                {state.periods[active].length===0 && <tr><td colSpan={4} className="p-4 text-gray-500">No students yet.</td></tr>}
-                {state.periods[active].map((s,i)=>(
-                  <tr key={s.id} className="border-t">
-                    <td className="p-2 text-gray-500">{i+1}</td>
-                    <td className="p-2"><input value={s.name} onChange={e=>updateStudent(active,i,{name:e.target.value})} className="w-full border px-2 py-1"/></td>
-                    <td className="p-2"><input value={s.photo} onChange={e=>updateStudent(active,i,{photo:e.target.value})} className="w-full border px-2 py-1"/></td>
-                    <td className="p-2"><button onClick={()=>removeStudent(active,i)} className="px-2 py-1 border">Remove</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="mt-4 bg-white rounded-2xl shadow border p-3">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="font-medium">Quick Paste Roster</h3>
-              <button onClick={()=>applyPaste(active)} className="px-3 py-1.5 rounded-xl bg-black text-white">Apply</button>
+        {/* Roster panel — only renders when expanded */}
+        {!rosterCollapsed && (
+          <section className="lg:col-span-5">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xl font-semibold">{state.titles[active]} — Roster</h2>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setRosterCollapsed(true)}
+                  className="px-3 py-1.5 rounded-xl border shadow-sm hover:bg-gray-50"
+                >
+                  Hide
+                </button>
+                <button onClick={()=>addStudent(active)} className="px-3 py-1.5 rounded-xl border">Add Student</button>
+              </div>
             </div>
-            <textarea value={pasteText} onChange={e=>setPasteText(e.target.value)} rows={6} className="w-full border px-2 py-2 font-mono text-xs"/>
-          </div>
-        </section>
+            <div className="bg-white rounded-2xl shadow border overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-100"><tr><th className="p-2">#</th><th className="p-2">Name</th><th className="p-2">Photo URL</th><th className="p-2">Actions</th></tr></thead>
+                <tbody>
+                  {state.periods[active].length===0 && <tr><td colSpan={4} className="p-4 text-gray-500">No students yet.</td></tr>}
+                  {state.periods[active].map((s,i)=>(
+                    <tr key={s.id} className="border-t">
+                      <td className="p-2 text-gray-500">{i+1}</td>
+                      <td className="p-2"><input value={s.name} onChange={e=>updateStudent(active,i,{name:e.target.value})} className="w-full border px-2 py-1"/></td>
+                      <td className="p-2"><input value={s.photo} onChange={e=>updateStudent(active,i,{photo:e.target.value})} className="w-full border px-2 py-1"/></td>
+                      <td className="p-2"><button onClick={()=>removeStudent(active,i)} className="px-2 py-1 border">Remove</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-4 bg-white rounded-2xl shadow border p-3">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-medium">Quick Paste Roster</h3>
+                <button onClick={()=>applyPaste(active)} className="px-3 py-1.5 rounded-xl bg-black text-white">Apply</button>
+              </div>
+              <textarea value={pasteText} onChange={e=>setPasteText(e.target.value)} rows={6} className="w-full border px-2 py-2 font-mono text-xs"/>
+            </div>
+          </section>
+        )}
       </main>
+      {/* ---------- END REPLACED MAIN ---------- */}
     </div>
   );
 }
@@ -362,4 +394,3 @@ function DeskCard(
     </div>
   );
 }
-
