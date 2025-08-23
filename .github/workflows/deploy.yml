@@ -20,15 +20,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-      - name: Install
-        run: npm ci || npm i
+          # remove cache: 'npm' so it doesn't require a lockfile
+
+      - name: Install deps
+        run: npm i --no-audit --no-fund
+
       - name: Build
         run: npm run build
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
