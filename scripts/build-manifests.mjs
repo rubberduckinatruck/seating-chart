@@ -3,36 +3,36 @@ import { readdirSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 const PERIODS = ["P1", "P3", "P4", "P5", "P6"];
-const root = "public/photos";
+const ROOT = "public/photos";
 
-let changed = false;
-
-function ensureDir(p) {
-  if (!existsSync(p)) mkdirSync(p, { recursive: true });
+function ensureDir(path) {
+  if (!existsSync(path)) mkdirSync(path, { recursive: true });
 }
 
-for (const p of PERIODS) {
-  const dir = join(root, p);
+let wroteAny = false;
+
+for (const period of PERIODS) {
+  const dir = join(ROOT, period);
   ensureDir(dir);
 
-  // read all .png files (case-sensitive match; adjust if you need jpg, etc.)
+  // Collect PNGs (adjust regex if you later add JPG/JPEG)
   let files = [];
   try {
     files = readdirSync(dir).filter(f => /\.png$/i.test(f));
-  } catch (e) {
-    // folder may not exist yet; skip
+  } catch {
     files = [];
   }
 
-  // sort for stable output
+  // Stable order
   files.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 
   const outPath = join(dir, "index.json");
-  const json = JSON.stringify(files, null, 2);
-
-  // write always; git will decide if it changed
-  writeFileSync(outPath, json + "\n");
-  changed = true;
+  const json = JSON.stringify(files, null, 2) + "\n";
+  writeFileSync(outPath, json);
+  wroteAny = true;
+  console.log(`[manifest] ${period}: ${files.length} file(s) → ${outPath}`);
 }
 
-console.log("Manifests generated under public/photos/*/index.json");
+if (!wroteAny) {
+  console.log("No manifests written (no period folders?).");
+}
