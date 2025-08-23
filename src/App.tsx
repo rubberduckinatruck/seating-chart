@@ -49,9 +49,18 @@ function saveState(state: AppState) {
   try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch {}
 }
 
+/* ---------- NEW: Rules types ---------- */
+type ApartRule = { aId: string; bId: string };
+type TogetherRule = { aId: string; bId: string };
+type PeriodRules = { apart: ApartRule[]; together: TogetherRule[] };
+/* ------------------------------------- */
+
 interface AppState {
   periods: Record<PeriodKey, Roster>;
   titles: Record<PeriodKey, string>;
+  /* ---------- NEW: rules per period ---------- */
+  rules: Record<PeriodKey, PeriodRules>;
+  /* ------------------------------------------ */
 }
 
 function shuffle<T>(arr: T[]): T[] {
@@ -105,17 +114,88 @@ async function loadPeriodFromManifest(period: "p1"|"p3"|"p4"|"p5"|"p6") {
 }
 /* ---------- END ADDED HELPERS ---------- */
 
+/* ---------- NEW: Rules helpers ---------- */
+// Convert seat index -> (row, col)
+function indexToRowCol(idx: number) {
+  const row = Math.floor(idx / COLS);
+  const col = idx % COLS;
+  return { row, col };
+}
+// Pair key: same row, columns 0–1, 2–3, 4–5 are pairs
+function pairKeyForIndex(idx: number) {
+  const { row, col } = indexToRowCol(idx);
+  const pair = Math.floor(col / 2);
+  return `${row}-${pair}`;
+}
+function findSeatIndexById(arr: (Student | null)[], id: string): number {
+  return arr.findIndex(s => s && s.id === id);
+}
+// Count rule conflicts for a given assignment
+function countConflicts(arr: (Student | null)[], rules: PeriodRules): number {
+  let conflicts = 0;
+  // Apart: the two students must NOT share the same pair
+  for (const r of rules.apart) {
+    if (!r.aId || !r.bId) continue;
+    const ai = findSeatIndexById(arr, r.aId);
+    const bi = findSeatIndexById(arr, r.bId);
+    if (ai < 0 || bi < 0) continue; // one not seated; ignore
+    if (pairKeyForIndex(ai) === pairKeyForIndex(bi)) conflicts++;
+  }
+  // Together: the two students MUST share the same pair
+  for (const r of rules.together) {
+    if (!r.aId || !r.bId) continue;
+    const ai = findSeatIndexById(arr, r.aId);
+    const bi = findSeatIndexById(arr, r.bId);
+    if (ai < 0 || bi < 0) { conflicts++; continue; }
+    if (pairKeyForIndex(ai) !== pairKeyForIndex(bi)) conflicts++;
+  }
+  return conflicts;
+}
+/* -------------------------------------- */
+
 const EMPTY_STATE: AppState = {
   periods: { p1: [], p3: [], p4: [], p5: [], p6: [] },
   titles: { ...DEFAULT_PERIOD_TITLES },
+  /* ---------- NEW: default empty rules ---------- */
+  rules: {
+    p1: { apart: [], together: [] },
+    p3: { apart: [], together: [] },
+    p4: { apart: [], together: [] },
+    p5: { apart: [], together: [] },
+    p6: { apart: [], together: [] },
+  },
+  /* -------------------------------------------- */
 };
 
+// Ensure loaded state has a rules object (for older saves)
+function ensureRulesShape(s: AppState | null): AppState {
+  if (!s) return EMPTY_STATE;
+  const base = { ...s };
+  if (!base.rules) {
+    base.rules = {
+      p1: { apart: [], together: [] },
+      p3: { apart: [], together: [] },
+      p4: { apart: [], together: [] },
+      p5: { apart: [], together: [] },
+      p6: { apart: [], together: [] },
+    };
+  } else {
+    // ensure all keys exist
+    for (const k of PERIOD_KEYS) {
+      if (!base.rules[k]) base.rules[k] = { apart: [], together: [] };
+      base.rules[k].apart ||= [];
+      base.rules[k].together ||= [];
+    }
+  }
+  return base;
+}
+
 export default function App() {
-  const [state, setState] = useState<AppState>(() => loadState() ?? EMPTY_STATE);
+  const [state, setState] = useState<AppState>(() => ensureRulesShape(loadState() ?? EMPTY_STATE));
   const [active, setActive] = useState<PeriodKey>("p1");
   const [assignments, setAssignments] = useState<Record<PeriodKey, (Student | null)[]>>(() => {
     const rec: Record<PeriodKey, (Student | null)[]> = {} as any;
-    PERIOD_KEYS.forEach(k => { rec[k] = padToSeats(state.periods[k]); });
+    PERIOD_KEYS.forEach(k => { rec[k] = padToSeats(ensureRulesShape(loadState() ?? EMPTY_STATE).periods[k]); });
     return rec;
   });
 
@@ -190,8 +270,9 @@ export default function App() {
       try {
         const incoming = JSON.parse(String(reader.result));
         if (incoming?.periods && incoming?.titles) {
-          setState(incoming);
-          const rec: any = {}; PERIOD_KEYS.forEach(k => { rec[k] = padToSeats(incoming.periods[k]); });
+          const normalized = ensureRulesShape(incoming);
+          setState(normalized);
+          const rec: any = {}; PERIOD_KEYS.forEach(k => { rec[k] = padToSeats(normalized.periods[k]); });
           setAssignments(rec);
         }
       } catch { alert("Invalid JSON"); }
@@ -244,6 +325,70 @@ export default function App() {
   // ---------- NEW: collapse state for roster panel ----------
   const [rosterCollapsed, setRosterCollapsed] = useState(true);
 
+  /* ---------- NEW: rules editor state helpers ---------- */
+  function rulesFor(p: PeriodKey): PeriodRules {
+    return state.rules[p] || { apart: [], together: [] };
+  }
+  function setRules(p: PeriodKey, next: PeriodRules) {
+    setState(s => ({ ...s, rules: { ...s.rules, [p]: next } }));
+  }
+  function addApartRule(period: PeriodKey) {
+    const r = rulesFor(period);
+    setRules(period, { ...r, apart: [...r.apart, { aId: "", bId: "" }] });
+  }
+  function addTogetherRule(period: PeriodKey) {
+    const r = rulesFor(period);
+    setRules(period, { ...r, together: [...r.together, { aId: "", bId: "" }] });
+  }
+  function updateApart(period: PeriodKey, idx: number, patch: Partial<ApartRule>) {
+    const r = rulesFor(period);
+    const next = r.apart.slice();
+    next[idx] = { ...next[idx], ...patch };
+    setRules(period, { ...r, apart: next });
+  }
+  function updateTogether(period: PeriodKey, idx: number, patch: Partial<TogetherRule>) {
+    const r = rulesFor(period);
+    const next = r.together.slice();
+    next[idx] = { ...next[idx], ...patch };
+    setRules(period, { ...r, together: next });
+  }
+  function removeApart(period: PeriodKey, idx: number) {
+    const r = rulesFor(period);
+    const next = r.apart.slice(); next.splice(idx, 1);
+    setRules(period, { ...r, apart: next });
+  }
+  function removeTogether(period: PeriodKey, idx: number) {
+    const r = rulesFor(period);
+    const next = r.together.slice(); next.splice(idx, 1);
+    setRules(period, { ...r, together: next });
+  }
+
+  // Rule-aware randomizer: try many shuffles; pick one that satisfies all rules (or closest)
+  function randomizeWithRules(period: PeriodKey) {
+    const roster = state.periods[period];
+    const rules = rulesFor(period);
+    let best = padToSeats(roster);
+    let bestConf = Number.POSITIVE_INFINITY;
+
+    for (let t = 0; t < 1500; t++) {
+      const arr = padToSeats(shuffle(roster));
+      const conf = countConflicts(arr, rules);
+      if (conf === 0) {
+        setAssignments(a => ({ ...a, [period]: arr }));
+        return;
+      }
+      if (conf < bestConf) { bestConf = conf; best = arr; }
+    }
+    setAssignments(a => ({ ...a, [period]: best }));
+    if (bestConf > 0) {
+      alert(`${bestConf} rule conflict(s) could not be satisfied; showing closest arrangement.`);
+    }
+  }
+  /* ---------- END rules editor helpers ---------- */
+
+  // ---------- NEW: roster panel tab (Students | Rules) ----------
+  const [rightTab, setRightTab] = useState<"students" | "rules">("students");
+
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
       <header className="sticky top-0 z-10 bg-white border-b">
@@ -295,7 +440,8 @@ export default function App() {
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-xl font-semibold">{state.titles[active]} — Seating</h2>
             <div className="flex items-center gap-2">
-              <button onClick={() => randomize(active)} className="px-3 py-1.5 rounded-xl bg-blue-600 text-white">Randomize</button>
+              {/* Use the rule-aware randomize */}
+              <button onClick={() => randomizeWithRules(active)} className="px-3 py-1.5 rounded-xl bg-blue-600 text-white">Randomize</button>
               <button onClick={() => sortAlpha(active)} className="px-3 py-1.5 rounded-xl border">Sort A→Z</button>
               <button onClick={downloadPNG} className="px-3 py-1.5 rounded-xl border">Download PNG</button>
               <button onClick={() => window.print()} className="px-3 py-1.5 rounded-xl border">Print</button>
@@ -322,44 +468,135 @@ export default function App() {
           </div>
         </section>
 
-        {/* Roster panel — only renders when expanded */}
+        {/* Roster/Rules panel — only renders when expanded */}
         {!rosterCollapsed && (
           <section className="lg:col-span-5">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-xl font-semibold">{state.titles[active]} — Roster</h2>
+              <h2 className="text-xl font-semibold">{state.titles[active]} — {rightTab === "students" ? "Roster" : "Rules"}</h2>
               <div className="flex items-center gap-2">
+                {/* simple two-tab switch */}
+                <div className="inline-flex rounded-xl overflow-hidden border">
+                  <button
+                    className={"px-3 py-1.5 text-sm " + (rightTab==="students" ? "bg-black text-white" : "bg-white")}
+                    onClick={() => setRightTab("students")}
+                  >Students</button>
+                  <button
+                    className={"px-3 py-1.5 text-sm " + (rightTab==="rules" ? "bg-black text-white" : "bg-white")}
+                    onClick={() => setRightTab("rules")}
+                  >Rules</button>
+                </div>
                 <button
                   onClick={() => setRosterCollapsed(true)}
                   className="px-3 py-1.5 rounded-xl border shadow-sm hover:bg-gray-50"
                 >
                   Hide
                 </button>
-                <button onClick={()=>addStudent(active)} className="px-3 py-1.5 rounded-xl border">Add Student</button>
+                {rightTab === "students" && (
+                  <button onClick={()=>addStudent(active)} className="px-3 py-1.5 rounded-xl border">Add Student</button>
+                )}
               </div>
             </div>
-            <div className="bg-white rounded-2xl shadow border overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-100"><tr><th className="p-2">#</th><th className="p-2">Name</th><th className="p-2">Photo URL</th><th className="p-2">Actions</th></tr></thead>
-                <tbody>
-                  {state.periods[active].length===0 && <tr><td colSpan={4} className="p-4 text-gray-500">No students yet.</td></tr>}
-                  {state.periods[active].map((s,i)=>(
-                    <tr key={s.id} className="border-t">
-                      <td className="p-2 text-gray-500">{i+1}</td>
-                      <td className="p-2"><input value={s.name} onChange={e=>updateStudent(active,i,{name:e.target.value})} className="w-full border px-2 py-1"/></td>
-                      <td className="p-2"><input value={s.photo} onChange={e=>updateStudent(active,i,{photo:e.target.value})} className="w-full border px-2 py-1"/></td>
-                      <td className="p-2"><button onClick={()=>removeStudent(active,i)} className="px-2 py-1 border">Remove</button></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="mt-4 bg-white rounded-2xl shadow border p-3">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="font-medium">Quick Paste Roster</h3>
-                <button onClick={()=>applyPaste(active)} className="px-3 py-1.5 rounded-xl bg-black text-white">Apply</button>
+
+            {rightTab === "students" ? (
+              <>
+                <div className="bg-white rounded-2xl shadow border overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-100"><tr><th className="p-2">#</th><th className="p-2">Name</th><th className="p-2">Photo URL</th><th className="p-2">Actions</th></tr></thead>
+                    <tbody>
+                      {state.periods[active].length===0 && <tr><td colSpan={4} className="p-4 text-gray-500">No students yet.</td></tr>}
+                      {state.periods[active].map((s,i)=>(
+                        <tr key={s.id} className="border-t">
+                          <td className="p-2 text-gray-500">{i+1}</td>
+                          <td className="p-2"><input value={s.name} onChange={e=>updateStudent(active,i,{name:e.target.value})} className="w-full border px-2 py-1"/></td>
+                          <td className="p-2"><input value={s.photo} onChange={e=>updateStudent(active,i,{photo:e.target.value})} className="w-full border px-2 py-1"/></td>
+                          <td className="p-2"><button onClick={()=>removeStudent(active,i)} className="px-2 py-1 border">Remove</button></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="mt-4 bg-white rounded-2xl shadow border p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="font-medium">Quick Paste Roster</h3>
+                    <button onClick={()=>applyPaste(active)} className="px-3 py-1.5 rounded-xl bg-black text-white">Apply</button>
+                  </div>
+                  <textarea value={pasteText} onChange={e=>setPasteText(e.target.value)} rows={6} className="w-full border px-2 py-2 font-mono text-xs"/>
+                </div>
+              </>
+            ) : (
+              <div className="bg-white rounded-2xl shadow border p-3 space-y-6">
+                {/* Keep Apart */}
+                <div>
+                  <h3 className="font-semibold mb-1">Keep Apart Rules</h3>
+                  <p className="text-sm text-gray-500 mb-2">Keep these students out of the same two-seat pair.</p>
+                  <div className="space-y-2">
+                    {rulesFor(active).apart.map((r, i) => (
+                      <div key={`apart-${i}`} className="flex items-center gap-2">
+                        <select
+                          className="border rounded-lg px-2 py-1 flex-1"
+                          value={r.aId}
+                          onChange={(e)=>updateApart(active, i, { aId: e.target.value })}
+                        >
+                          <option value="">— Select —</option>
+                          {state.periods[active].map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                        <span className="text-gray-500">and</span>
+                        <select
+                          className="border rounded-lg px-2 py-1 flex-1"
+                          value={r.bId}
+                          onChange={(e)=>updateApart(active, i, { bId: e.target.value })}
+                        >
+                          <option value="">— Select —</option>
+                          {state.periods[active].map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                        <button className="px-2 py-1 border rounded-lg" onClick={()=>removeApart(active, i)}>Remove</button>
+                      </div>
+                    ))}
+                  </div>
+                  <button className="mt-2 px-3 py-1.5 rounded-xl border shadow-sm hover:bg-gray-50" onClick={()=>addApartRule(active)}>+ Keep Apart Rule</button>
+                </div>
+
+                {/* Keep Together */}
+                <div>
+                  <h3 className="font-semibold mb-1">Keep Together Rules</h3>
+                  <p className="text-sm text-gray-500 mb-2">Seat these students in the same two-seat pair.</p>
+                  <div className="space-y-2">
+                    {rulesFor(active).together.map((r, i) => (
+                      <div key={`together-${i}`} className="flex items-center gap-2">
+                        <select
+                          className="border rounded-lg px-2 py-1 flex-1"
+                          value={r.aId}
+                          onChange={(e)=>updateTogether(active, i, { aId: e.target.value })}
+                        >
+                          <option value="">— Select —</option>
+                          {state.periods[active].map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                        <span className="text-gray-500">with</span>
+                        <select
+                          className="border rounded-lg px-2 py-1 flex-1"
+                          value={r.bId}
+                          onChange={(e)=>updateTogether(active, i, { bId: e.target.value })}
+                        >
+                          <option value="">— Select —</option>
+                          {state.periods[active].map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                        <button className="px-2 py-1 border rounded-lg" onClick={()=>removeTogether(active, i)}>Remove</button>
+                      </div>
+                    ))}
+                  </div>
+                  <button className="mt-2 px-3 py-1.5 rounded-xl border shadow-sm hover:bg-gray-50" onClick={()=>addTogetherRule(active)}>+ Keep Together Rule</button>
+                </div>
+
+                <div className="pt-2 border-t">
+                  <button
+                    className="mt-3 px-3 py-1.5 rounded-xl bg-blue-600 text-white"
+                    onClick={()=>randomizeWithRules(active)}
+                  >
+                    Randomize (Apply Rules)
+                  </button>
+                </div>
               </div>
-              <textarea value={pasteText} onChange={e=>setPasteText(e.target.value)} rows={6} className="w-full border px-2 py-2 font-mono text-xs"/>
-            </div>
+            )}
           </section>
         )}
       </main>
