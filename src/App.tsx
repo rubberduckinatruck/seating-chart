@@ -74,20 +74,43 @@ function stemToDisplay(stem: string) {
   return stem.replace(/_/g, " ");
 }
 
-async function loadPeriodFromManifest(period: PeriodKey) {
-  const url = `./photos/${period}/index.json`; // served from public/
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`${period} manifest not found`);
-  const files: string[] = await res.json(); // e.g., ["John_Smith.png", ...]
+async function loadPeriodFromManifest(period: "P1"|"P3"|"P4"|"P5"|"P6") {
+  // Try uppercase folder first, then lowercase
+  const tryUrls = [
+    `./photos/${period}/index.json`,
+    `./photos/${period.toLowerCase()}/index.json`,
+  ];
+
+  let files: string[] | null = null;
+  let basePath = `./photos/${period}/`; // will change if lowercase hits
+
+  for (const u of tryUrls) {
+    try {
+      const res = await fetch(u, { cache: "no-store" });
+      if (res.ok) {
+        files = await res.json();
+        if (u.includes(`/${period.toLowerCase()}/`)) {
+          basePath = `./photos/${period.toLowerCase()}/`;
+        }
+        break;
+      }
+    } catch {
+      // ignore and try the next candidate
+    }
+  }
+
+  if (!files) throw new Error(`${period} manifest not found`);
+
   return files.map(stemWithExt => {
     const stem = stemWithExt.replace(/\.[^.]+$/, "");
     return {
       id: stem,
-      name: stemToDisplay(stem),
-      photo: `./photos/${period}/${stemWithExt}`,
+      name: stem.replace(/_/g, " "),
+      photo: `${basePath}${stemWithExt}`,
     } as Student;
   });
 }
+
 /* ---------- END ADDED HELPERS ---------- */
 
 const EMPTY_STATE: AppState = {
