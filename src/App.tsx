@@ -473,7 +473,7 @@ export default function App() {
   style={{
   gridTemplateColumns:
     "minmax(80px,1fr) minmax(80px,1fr) 40px minmax(80px,1fr) minmax(80px,1fr) 40px minmax(80px,1fr) minmax(80px,1fr)",
-  columnGap: "12px",
+  columnGap: "6 px",
   rowGap: "12px"
 }}
 >
