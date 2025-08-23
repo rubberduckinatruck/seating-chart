@@ -4,13 +4,13 @@ on:
   push:
     branches: [ "main" ]
     paths:
-      - "public/photos/**"              # trigger when photos change
-      - "!public/photos/**/index.json"  # but ignore commits that only change index.json (prevents loops)
+      - "public/photos/**"
+      - "!public/photos/**/index.json"
       - "scripts/build-manifests.mjs"
   workflow_dispatch:
 
 permissions:
-  contents: write  # allow committing updated index.json files
+  contents: write
 
 jobs:
   build-manifests:
