@@ -2,7 +2,7 @@
 import { readdirSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-const LABELS = ["P1", "P3", "P4", "P5", "P6"]; // logical period labels
+const LABELS = ["p1", "p3", "p4", "p5", "p6"]; // logical period labels
 const ROOT = "public/photos";
 
 function ensureDir(path) {
@@ -11,7 +11,7 @@ function ensureDir(path) {
 
 // choose a single on-disk folder for a given period:
 // - if lowercase exists (e.g., p1), use that
-// - else if uppercase exists (e.g., P1), use that
+// - else if uppercase exists (e.g., p1), use that
 // - else create lowercase to avoid future dupes
 function pickFolder(label) {
   const lower = join(ROOT, label.toLowerCase());
