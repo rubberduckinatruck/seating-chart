@@ -4,7 +4,8 @@ on:
   push:
     branches: [ "main" ]
     paths:
-      - "public/photos/**"
+      - "public/photos/**"              # trigger when photos change
+      - "!public/photos/**/index.json"  # but ignore commits that only change index.json (prevents loops)
       - "scripts/build-manifests.mjs"
   workflow_dispatch:
 
@@ -13,6 +14,7 @@ permissions:
 
 jobs:
   build-manifests:
+    if: ${{ !contains(github.event.head_commit.message, 'chore: update photo manifests') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -26,9 +28,7 @@ jobs:
           node-version: "20"
 
       - name: Generate manifests
-        run: |
-          node --version
-          node scripts/build-manifests.mjs
+        run: node scripts/build-manifests.mjs
 
       - name: Commit manifests (if changed)
         run: |
