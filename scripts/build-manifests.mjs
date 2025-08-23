@@ -2,23 +2,33 @@
 import { readdirSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-const PERIODS = ["P1", "P3", "P4", "P5", "P6"];
+const LABELS = ["P1", "P3", "P4", "P5", "P6"]; // logical period labels
 const ROOT = "public/photos";
 
 function ensureDir(path) {
   if (!existsSync(path)) mkdirSync(path, { recursive: true });
 }
 
-let wroteAny = false;
+// choose a single on-disk folder for a given period:
+// - if lowercase exists (e.g., p1), use that
+// - else if uppercase exists (e.g., P1), use that
+// - else create lowercase to avoid future dupes
+function pickFolder(label) {
+  const lower = join(ROOT, label.toLowerCase());
+  const upper = join(ROOT, label);
+  if (existsSync(lower)) return lower;
+  if (existsSync(upper)) return upper;
+  ensureDir(lower);
+  return lower;
+}
 
-for (const period of PERIODS) {
-  const dir = join(ROOT, period);
-  ensureDir(dir);
+for (const label of LABELS) {
+  const dir = pickFolder(label);
 
-  // Collect PNGs (adjust regex if you later add JPG/JPEG)
+  // Collect images (png/jpg/jpeg)
   let files = [];
   try {
-    files = readdirSync(dir).filter(f => /\.png$/i.test(f));
+    files = readdirSync(dir).filter(f => /\.(png|jpg|jpeg)$/i.test(f));
   } catch {
     files = [];
   }
@@ -29,10 +39,8 @@ for (const period of PERIODS) {
   const outPath = join(dir, "index.json");
   const json = JSON.stringify(files, null, 2) + "\n";
   writeFileSync(outPath, json);
-  wroteAny = true;
-  console.log(`[manifest] ${period}: ${files.length} file(s) → ${outPath}`);
+
+  console.log(`[manifest] ${label} → ${dir}: ${files.length} file(s)`);
 }
 
-if (!wroteAny) {
-  console.log("No manifests written (no period folders?).");
-}
+console.log("Manifests generated under public/photos/*/index.json");
