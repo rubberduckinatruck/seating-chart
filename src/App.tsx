@@ -613,7 +613,7 @@ function DeskCard(
 ) {
   return (
     <div
-      className="rounded-2xl border shadow-sm bg-white p-1.8 flex flex-col items-center justify-start min-h-[140px] w-[180px]"
+      className="rounded-2xl border shadow-sm bg-white p-1.8 flex flex-col items-center justify-start min-h-[140px] w-[100px]"
       draggable={!!student}
       onDragStart={onDragStart}
       onDragOver={onDragOver}
