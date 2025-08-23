@@ -468,7 +468,16 @@ export default function App() {
           </div>
 
           <div id="chartCapture" className="bg-white rounded-2xl shadow p-4 border">
-            <div className="grid" style={{gridTemplateColumns:"repeat(8, minmax(0, 1fr))", columnGap:"12px", rowGap:"12px"}}>
+            <div
+  className="grid"
+  style={{
+    gridTemplateColumns:
+      "minmax(0,1fr) minmax(0,1fr) 24px minmax(0,1fr) minmax(0,1fr) 24px minmax(0,1fr) minmax(0,1fr)",
+    columnGap: "12px",
+    rowGap: "12px"
+  }}
+>
+
               {Array.from({ length: ROWS }).map((_, r) => (
                 <React.Fragment key={r}>
                   {Array.from({ length: 8 }).map((__, vcol) => {
