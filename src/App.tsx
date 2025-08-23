@@ -389,6 +389,20 @@ export default function App() {
   // ---------- NEW: roster panel tab (Students | Rules) ----------
   const [rightTab, setRightTab] = useState<"students" | "rules">("students");
 
+  // ---------- NEW: unified toggle handler for Students/Rules buttons ----------
+  function togglePanel(tab: "students" | "rules") {
+    if (rosterCollapsed) {
+      setRightTab(tab);
+      setRosterCollapsed(false);   // open on the requested tab
+    } else {
+      if (rightTab === tab) {
+        setRosterCollapsed(true);  // clicking the same tab hides the panel
+      } else {
+        setRightTab(tab);          // switch tabs while open
+      }
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
       <header className="sticky top-0 z-10 bg-white border-b">
@@ -418,33 +432,38 @@ export default function App() {
         </nav>
       </header>
 
-      {/* ---------- REPLACED MAIN TO SUPPORT COLLAPSIBLE ROSTER + WIDE SEATING ---------- */}
+      {/* ---------- REPLACED MAIN TO KEEP ONE TOP ROW + TOGGLING STUDENTS/RULES ---------- */}
       <main className="mx-auto max-w-6xl px-4 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Collapsed roster header bar (shown only when collapsed) */}
-        {rosterCollapsed && (
-          <section className="lg:col-span-12">
-            <div className="bg-white rounded-2xl shadow border px-4 py-2 flex items-center justify-between">
-              <h2 className="text-xl font-semibold">{state.titles[active]} — Roster</h2>
-              <button
-                onClick={() => setRosterCollapsed(false)}
-                className="px-3 py-1.5 rounded-xl border shadow-sm hover:bg-gray-50"
-              >
-                Show
-              </button>
-            </div>
-          </section>
-        )}
-
         {/* Seating — expands to full width when roster is collapsed */}
         <section className={rosterCollapsed ? "lg:col-span-12" : "lg:col-span-7"}>
-          <div className="flex items-center justify-between mb-3">
+          {/* ONE unified toolbar row */}
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
             <h2 className="text-xl font-semibold">{state.titles[active]} — Seating</h2>
-            <div className="flex items-center gap-2">
-              {/* Use the rule-aware randomize */}
-              <button onClick={() => randomizeWithRules(active)} className="px-3 py-1.5 rounded-xl bg-blue-600 text-white">Randomize</button>
-              <button onClick={() => sortAlpha(active)} className="px-3 py-1.5 rounded-xl border">Sort A→Z</button>
-              <button onClick={downloadPNG} className="px-3 py-1.5 rounded-xl border">Download PNG</button>
-              <button onClick={() => window.print()} className="px-3 py-1.5 rounded-xl border">Print</button>
+
+            <div className="flex items-center gap-3">
+              {/* Seating actions (left side of the right cluster) */}
+              <div className="flex items-center gap-2">
+                <button onClick={() => randomizeWithRules(active)} className="px-3 py-1.5 rounded-xl bg-blue-600 text-white">Randomize</button>
+                <button onClick={() => sortAlpha(active)} className="px-3 py-1.5 rounded-xl border">Sort A→Z</button>
+                <button onClick={downloadPNG} className="px-3 py-1.5 rounded-xl border">Download PNG</button>
+                <button onClick={() => window.print()} className="px-3 py-1.5 rounded-xl border">Print</button>
+              </div>
+
+              {/* Students / Rules buttons (right side of the same row) */}
+              <div className="inline-flex rounded-xl overflow-hidden border">
+                <button
+                  className={"px-3 py-1.5 text-sm " + (!rosterCollapsed && rightTab==="students" ? "bg-black text-white" : "bg-white")}
+                  onClick={() => togglePanel("students")}
+                >
+                  Students
+                </button>
+                <button
+                  className={"px-3 py-1.5 text-sm " + (!rosterCollapsed && rightTab==="rules" ? "bg-black text-white" : "bg-white")}
+                  onClick={() => togglePanel("rules")}
+                >
+                  Rules
+                </button>
+              </div>
             </div>
           </div>
 
@@ -468,35 +487,9 @@ export default function App() {
           </div>
         </section>
 
-        {/* Roster/Rules panel — only renders when expanded */}
+        {/* Right panel — only renders when expanded. No header; the top row handles that. */}
         {!rosterCollapsed && (
           <section className="lg:col-span-5">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-xl font-semibold">{state.titles[active]} — {rightTab === "students" ? "Roster" : "Rules"}</h2>
-              <div className="flex items-center gap-2">
-                {/* simple two-tab switch */}
-                <div className="inline-flex rounded-xl overflow-hidden border">
-                  <button
-                    className={"px-3 py-1.5 text-sm " + (rightTab==="students" ? "bg-black text-white" : "bg-white")}
-                    onClick={() => setRightTab("students")}
-                  >Students</button>
-                  <button
-                    className={"px-3 py-1.5 text-sm " + (rightTab==="rules" ? "bg-black text-white" : "bg-white")}
-                    onClick={() => setRightTab("rules")}
-                  >Rules</button>
-                </div>
-                <button
-                  onClick={() => setRosterCollapsed(true)}
-                  className="px-3 py-1.5 rounded-xl border shadow-sm hover:bg-gray-50"
-                >
-                  Hide
-                </button>
-                {rightTab === "students" && (
-                  <button onClick={()=>addStudent(active)} className="px-3 py-1.5 rounded-xl border">Add Student</button>
-                )}
-              </div>
-            </div>
-
             {rightTab === "students" ? (
               <>
                 <div className="bg-white rounded-2xl shadow border overflow-hidden">
