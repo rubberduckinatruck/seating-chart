@@ -336,16 +336,30 @@ export default function App() {
   );
 }
 
-function DeskCard({ student, onDragStart, onDragOver, onDrop }:{ student: Student|null; onDragStart:()=>void; onDragOver:(e:React.DragEvent)=>void; onDrop:()=>void }) {
+function DeskCard(
+  { student, onDragStart, onDragOver, onDrop }:
+  { student: Student|null; onDragStart:()=>void; onDragOver:(e:React.DragEvent)=>void; onDrop:()=>void }
+) {
   return (
-    <div className="rounded-2xl border shadow-sm bg-white p-2 flex items-center gap-2 min-h-[88px]"
-      draggable={!!student} onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop}>
+    <div
+      className="rounded-2xl border shadow-sm bg-white p-2 flex flex-col items-center justify-start min-h-[112px]"
+      draggable={!!student}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      title={student?.name || ""}  // full name on hover
+    >
       <div className="w-[64px] h-[64px] rounded-xl overflow-hidden bg-gray-100 flex items-center justify-center">
-        {student?.photo ? <img src={student.photo} alt={student.name} className="w-full h-full object-cover"/> : <div className="text-xs text-gray-400">No Photo</div>}
+        {student?.photo
+          ? <img src={student.photo} alt={student.name} className="w-full h-full object-cover"/>
+          : <div className="text-xs text-gray-400">No Photo</div>}
       </div>
-      <div className="flex-1 min-w-0">
-        <div className="font-medium truncate">{student?.name || "(empty)"}</div>
+
+      {/* Name under the image */}
+      <div className="mt-1 w-full px-1 text-center leading-tight text-xs break-words">
+        {student?.name || "(empty)"}
       </div>
     </div>
   );
 }
+
