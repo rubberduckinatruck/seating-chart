@@ -13,13 +13,13 @@ import { toPng } from "html-to-image";
  * • Import/Export JSON + Download PNG
  */
 
-const PERIOD_KEYS = ["P1", "P3", "P4", "P5", "P6"] as const;
+const PERIOD_KEYS = ["p1", "p3", "p4", "p5", "p6"] as const;
 const DEFAULT_PERIOD_TITLES: Record<typeof PERIOD_KEYS[number], string> = {
-  P1: "Period 1",
-  P3: "Period 3",
-  P4: "Period 4",
-  P5: "Period 5",
-  P6: "Period 6",
+  p1: "Period 1",
+  p3: "Period 3",
+  p4: "Period 4",
+  p5: "Period 5",
+  p6: "Period 6",
 };
 
 type PeriodKey = typeof PERIOD_KEYS[number];
@@ -83,7 +83,7 @@ function joinBase(...parts: string[]) {
   return b + parts.map(p => p.replace(/^\/+|\/+$/g, "")).join("/");
 }
 
-async function loadPeriodFromManifest(period: "P1"|"P3"|"P4"|"P5"|"P6") {
+async function loadPeriodFromManifest(period: "p1"|"p3"|"p4"|"p5"|"p6") {
   // lowercase folders only (p1, p3, ...)
   const folder = period.toLowerCase();
   const manifestUrl = joinBase("photos", folder, "index.json");
@@ -106,13 +106,13 @@ async function loadPeriodFromManifest(period: "P1"|"P3"|"P4"|"P5"|"P6") {
 /* ---------- END ADDED HELPERS ---------- */
 
 const EMPTY_STATE: AppState = {
-  periods: { P1: [], P3: [], P4: [], P5: [], P6: [] },
+  periods: { p1: [], p3: [], p4: [], p5: [], p6: [] },
   titles: { ...DEFAULT_PERIOD_TITLES },
 };
 
 export default function App() {
   const [state, setState] = useState<AppState>(() => loadState() ?? EMPTY_STATE);
-  const [active, setActive] = useState<PeriodKey>("P1");
+  const [active, setActive] = useState<PeriodKey>("p1");
   const [assignments, setAssignments] = useState<Record<PeriodKey, (Student | null)[]>>(() => {
     const rec: Record<PeriodKey, (Student | null)[]> = {} as any;
     PERIOD_KEYS.forEach(k => { rec[k] = padToSeats(state.periods[k]); });
@@ -216,23 +216,23 @@ export default function App() {
   async function loadRostersFromPhotos() {
     try {
       const results = await Promise.all([
-        loadPeriodFromManifest("P1"),
-        loadPeriodFromManifest("P3"),
-        loadPeriodFromManifest("P4"),
-        loadPeriodFromManifest("P5"),
-        loadPeriodFromManifest("P6"),
+        loadPeriodFromManifest("p1"),
+        loadPeriodFromManifest("p3"),
+        loadPeriodFromManifest("p4"),
+        loadPeriodFromManifest("p5"),
+        loadPeriodFromManifest("p6"),
       ]);
       const [p1, p3, p4, p5, p6] = results;
       setState(s => ({
         ...s,
-        periods: { P1: p1, P3: p3, P4: p4, P5: p5, P6: p6 }
+        periods: { p1: p1, p3: p3, p4: p4, p5: p5, p6: p6 }
       }));
       setAssignments({
-        P1: padToSeats(p1),
-        P3: padToSeats(p3),
-        P4: padToSeats(p4),
-        P5: padToSeats(p5),
-        P6: padToSeats(p6),
+        p1: padToSeats(p1),
+        p3: padToSeats(p3),
+        p4: padToSeats(p4),
+        p5: padToSeats(p5),
+        p6: padToSeats(p6),
       });
       alert("Rosters loaded from photo manifests.");
     } catch (e: any) {
