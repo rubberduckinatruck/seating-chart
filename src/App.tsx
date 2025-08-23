@@ -69,48 +69,40 @@ function padToSeats(roster: Roster, seatCount = ROWS * COLS): (Student | null)[]
   return out;
 }
 
-/* ---------- ADDED HELPERS FOR PHOTO MANIFESTS ---------- */
+/* ---------- ADDED HELPERS FOR PHOTO MANIFESTS (lowercase-only + base-aware) ---------- */
 function stemToDisplay(stem: string) {
   return stem.replace(/_/g, " ");
 }
 
+// Use Vite's base so paths work on GitHub Pages (/seating-chart/)
+const BASE = (import.meta as any).env?.BASE_URL || "/";
+
+// join helper that respects BASE and avoids double slashes
+function joinBase(...parts: string[]) {
+  const b = BASE.endsWith("/") ? BASE : BASE + "/";
+  return b + parts.map(p => p.replace(/^\/+|\/+$/g, "")).join("/");
+}
+
 async function loadPeriodFromManifest(period: "P1"|"P3"|"P4"|"P5"|"P6") {
-  // Try uppercase folder first, then lowercase
-  const tryUrls = [
-    `./photos/${period}/index.json`,
-    `./photos/${period.toLowerCase()}/index.json`,
-  ];
+  // lowercase folders only (p1, p3, ...)
+  const folder = period.toLowerCase();
+  const manifestUrl = joinBase("photos", folder, "index.json");
 
-  let files: string[] | null = null;
-  let basePath = `./photos/${period}/`; // will change if lowercase hits
+  const res = await fetch(manifestUrl, { cache: "no-store" });
+  if (!res.ok) throw new Error(`${period} manifest not found`);
 
-  for (const u of tryUrls) {
-    try {
-      const res = await fetch(u, { cache: "no-store" });
-      if (res.ok) {
-        files = await res.json();
-        if (u.includes(`/${period.toLowerCase()}/`)) {
-          basePath = `./photos/${period.toLowerCase()}/`;
-        }
-        break;
-      }
-    } catch {
-      // ignore and try the next candidate
-    }
-  }
+  const files: string[] = await res.json(); // e.g., ["John_Smith.png", ...]
+  const basePath = joinBase("photos", folder) + "/";
 
-  if (!files) throw new Error(`${period} manifest not found`);
-
-  return files.map(stemWithExt => {
-    const stem = stemWithExt.replace(/\.[^.]+$/, "");
+  return files.map(filename => {
+    const stem = filename.replace(/\.[^.]+$/, "");
     return {
       id: stem,
-      name: stem.replace(/_/g, " "),
-      photo: `${basePath}${stemWithExt}`,
+      name: stemToDisplay(stem),
+      photo: basePath + filename,
     } as Student;
   });
 }
-
 /* ---------- END ADDED HELPERS ---------- */
 
 const EMPTY_STATE: AppState = {
@@ -257,7 +249,7 @@ export default function App() {
             <span className="text-2xl font-bold">Seating Chart</span>
             <span className="text-sm text-gray-500">(6×6 desks · pairs with spacers)</span>
           </div>
-          <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2">
             <button onClick={exportJSON} className="px-3 py-1.5 rounded-xl border shadow-sm hover:bg-gray-50">Export JSON</button>
             <label className="px-3 py-1.5 rounded-xl border shadow-sm hover:bg-gray-50 cursor-pointer">
               Import JSON
