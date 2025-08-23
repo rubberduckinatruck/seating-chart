@@ -1,19 +1,20 @@
-import React, { useEffect, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
+import { toPng } from "html-to-image";
 
 /**
- * Multi-Period Seating Chart (ShuffleBuddy-style)
- * - 6 rows × 3 paired columns (6×6 desks), with spacer columns between each pair
- * - Separate pages (tabs) for periods: 1,3,4,5,6
- * - Randomize, Sort A→Z (first name), Manual drag-and-drop
- * - Photos + names on cards
- * - Local save via localStorage; Export/Import JSON; Download PNG
+ * Multi-Period Seating Chart (Names + Photos)
+ * -------------------------------------------
+ * • 6 rows × 3 paired columns (6×6 desks) with spacer columns
+ * • Each period has its own page (tab)
+ * • Randomize or Sort A→Z seating
+ * • Manual drag-and-drop swap
+ * • Shows Name + Photo on each desk
+ * • Persistent in localStorage
+ * • Import/Export JSON + Download PNG
  */
 
-// ---- Types / Constants ----
 const PERIOD_KEYS = ["P1", "P3", "P4", "P5", "P6"] as const;
-type PeriodKey = typeof PERIOD_KEYS[number];
-
-const DEFAULT_PERIOD_TITLES: Record<PeriodKey, string> = {
+const DEFAULT_PERIOD_TITLES: Record<typeof PERIOD_KEYS[number], string> = {
   P1: "Period 1",
   P3: "Period 3",
   P4: "Period 4",
@@ -21,24 +22,38 @@ const DEFAULT_PERIOD_TITLES: Record<PeriodKey, string> = {
   P6: "Period 6",
 };
 
+type PeriodKey = typeof PERIOD_KEYS[number];
+
 type Student = {
-  id: string;     // stable id, e.g., first_last
-  name: string;   // display name
-  photo: string;  // image URL (PNG)
+  id: string;
+  name: string;
+  photo: string;
 };
 
 type Roster = Student[];
+
+const ROWS = 6;
+const COLS = 6;
+
+const LS_KEY = "sb_multi_period_seating_v1";
+function loadState(): AppState | null {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+function saveState(state: AppState) {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch {}
+}
 
 interface AppState {
   periods: Record<PeriodKey, Roster>;
   titles: Record<PeriodKey, string>;
 }
 
-const ROWS = 6;
-const COLS = 6;
-const LS_KEY = "sb_multi_period_seating_v1";
-
-// ---- Utilities ----
 function shuffle<T>(arr: T[]): T[] {
   const a = arr.slice();
   for (let i = a.length - 1; i > 0; i--) {
@@ -47,55 +62,53 @@ function shuffle<T>(arr: T[]): T[] {
   }
   return a;
 }
+
 function padToSeats(roster: Roster, seatCount = ROWS * COLS): (Student | null)[] {
   const out: (Student | null)[] = roster.slice(0, seatCount);
   while (out.length < seatCount) out.push(null);
   return out;
 }
-function loadState(): AppState | null {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-function saveState(state: AppState) {
-  try {
-    localStorage.setItem(LS_KEY, JSON.stringify(state));
-  } catch {}
+
+/* ---------- ADDED HELPERS FOR PHOTO MANIFESTS ---------- */
+function stemToDisplay(stem: string) {
+  return stem.replace(/_/g, " ");
 }
 
-// ---- Initial State ----
+async function loadPeriodFromManifest(period: PeriodKey) {
+  const url = `./photos/${period}/index.json`; // served from public/
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`${period} manifest not found`);
+  const files: string[] = await res.json(); // e.g., ["John_Smith.png", ...]
+  return files.map(stemWithExt => {
+    const stem = stemWithExt.replace(/\.[^.]+$/, "");
+    return {
+      id: stem,
+      name: stemToDisplay(stem),
+      photo: `./photos/${period}/${stemWithExt}`,
+    } as Student;
+  });
+}
+/* ---------- END ADDED HELPERS ---------- */
+
 const EMPTY_STATE: AppState = {
   periods: { P1: [], P3: [], P4: [], P5: [], P6: [] },
   titles: { ...DEFAULT_PERIOD_TITLES },
 };
 
-// ---- App ----
 export default function App() {
   const [state, setState] = useState<AppState>(() => loadState() ?? EMPTY_STATE);
   const [active, setActive] = useState<PeriodKey>("P1");
-  const [assignments, setAssignments] = useState<Record<PeriodKey, (Student | null)[]>>(() => ({
-    P1: padToSeats(state.periods.P1),
-    P3: padToSeats(state.periods.P3),
-    P4: padToSeats(state.periods.P4),
-    P5: padToSeats(state.periods.P5),
-    P6: padToSeats(state.periods.P6),
-  }));
+  const [assignments, setAssignments] = useState<Record<PeriodKey, (Student | null)[]>>(() => {
+    const rec: Record<PeriodKey, (Student | null)[]> = {} as any;
+    PERIOD_KEYS.forEach(k => { rec[k] = padToSeats(state.periods[k]); });
+    return rec;
+  });
 
-  // Save to localStorage whenever state changes
+  const [dragFromIdx, setDragFromIdx] = useState<number | null>(null);
+
   useEffect(() => { saveState(state); }, [state]);
 
-  // Re-pad seats when switching active period
-  useEffect(() => {
-    setAssignments(prev => ({
-      ...prev,
-      [active]: padToSeats(prev[active]?.filter(Boolean) as Student[]),
-    }));
-  }, [active]);
-
-  // ---- Roster editing ----
+  // ---- Editing ----
   function addStudent(period: PeriodKey) {
     const id = `student_${Date.now()}`;
     updatePeriod(period, [...state.periods[period], { id, name: "First Last", photo: "" }]);
@@ -115,38 +128,37 @@ export default function App() {
     setAssignments(a => ({ ...a, [period]: padToSeats(roster) }));
   }
 
-  // ---- Randomize / Sort ----
+  // ---- Actions ----
   function randomize(period: PeriodKey) {
-    const roster = state.periods[period];
-    setAssignments(a => ({ ...a, [period]: padToSeats(shuffle(roster)) }));
+    setAssignments(a => ({ ...a, [period]: padToSeats(shuffle(state.periods[period])) }));
   }
   function sortAlpha(period: PeriodKey) {
     const roster = state.periods[period].slice();
-    roster.sort((a, b) => {
-      const fa = (a.name?.trim().split(/\s+/)[0] || "").toLowerCase();
-      const fb = (b.name?.trim().split(/\s+/)[0] || "").toLowerCase();
-      return fa.localeCompare(fb);
-    });
+    roster.sort((a, b) => (a.name?.split(/\s+/)[0] || "").localeCompare(b.name?.split(/\s+/)[0] || ""));
     setAssignments(a => ({ ...a, [period]: padToSeats(roster) }));
   }
-
-  // ---- Drag & Drop manual move (swap seats) ----
-  const [dragFromIdx, setDragFromIdx] = useState<number | null>(null);
-  function handleDragStart(index: number) { setDragFromIdx(index); }
+  function handleDragStart(idx: number) { setDragFromIdx(idx); }
   function handleDragOver(e: React.DragEvent) { e.preventDefault(); }
   function handleDrop(targetIdx: number) {
     if (dragFromIdx === null || dragFromIdx === targetIdx) return;
     setAssignments(prev => {
       const arr = prev[active].slice();
-      const temp = arr[targetIdx];
-      arr[targetIdx] = arr[dragFromIdx];
-      arr[dragFromIdx] = temp;
+      [arr[dragFromIdx], arr[targetIdx]] = [arr[targetIdx], arr[dragFromIdx]];
       return { ...prev, [active]: arr };
     });
     setDragFromIdx(null);
   }
+  async function downloadPNG() {
+    const node = document.getElementById('chartCapture');
+    if (!node) return;
+    const dataUrl = await toPng(node as HTMLElement, { pixelRatio: 2 });
+    const a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = `${state.titles[active].replace(/\s+/g, '_').toLowerCase()}_seating.png`;
+    a.click();
+  }
 
-  // ---- Export / Import JSON ----
+  // ---- Import / Export ----
   function exportJSON() {
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -157,58 +169,62 @@ export default function App() {
     URL.revokeObjectURL(url);
   }
   function importJSON(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const f = e.target.files?.[0]; if (!f) return;
     const reader = new FileReader();
     reader.onload = () => {
       try {
         const incoming = JSON.parse(String(reader.result));
-        if (incoming && incoming.periods && incoming.titles) {
+        if (incoming?.periods && incoming?.titles) {
           setState(incoming);
-          setAssignments({
-            P1: padToSeats(incoming.periods.P1),
-            P3: padToSeats(incoming.periods.P3),
-            P4: padToSeats(incoming.periods.P4),
-            P5: padToSeats(incoming.periods.P5),
-            P6: padToSeats(incoming.periods.P6),
-          });
+          const rec: any = {}; PERIOD_KEYS.forEach(k => { rec[k] = padToSeats(incoming.periods[k]); });
+          setAssignments(rec);
         }
-      } catch {
-        alert("Invalid JSON");
-      }
+      } catch { alert("Invalid JSON"); }
     };
-    reader.readAsText(file);
+    reader.readAsText(f);
   }
 
-  // ---- Paste Roster Wizard (Name,PhotoURL per line) ----
+  // ---- Paste Wizard ----
   const [pasteText, setPasteText] = useState("");
   function applyPaste(period: PeriodKey) {
     const rows = pasteText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     const roster: Roster = rows.map((line, i) => {
       const [name, photo = ""] = line.split(/,\s*/);
-      const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || `s_${i}`;
+      const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "_") || `s_${i}`;
       return { id, name, photo };
     });
     updatePeriod(period, roster);
     setPasteText("");
   }
 
-  // ---- Download Seating Chart as PNG ----
-  async function downloadPNG() {
-    const node = document.getElementById("chartCapture");
-    if (!node) { alert("Chart area not found"); return; }
+  /* ---------- ADDED: LOAD ROSTERS FROM PHOTO MANIFESTS (ALL PERIODS) ---------- */
+  async function loadRostersFromPhotos() {
     try {
-      const { toPng } = await import("html-to-image");
-      const dataUrl = await toPng(node, { pixelRatio: 2 });
-      const a = document.createElement("a");
-      a.href = dataUrl;
-      a.download = `${state.titles[active].replace(/\s+/g, "_").toLowerCase()}_seating.png`;
-      a.click();
-    } catch (err) {
-      console.error(err);
-      alert("Could not generate image. Try refreshing once and retry.");
+      const results = await Promise.all([
+        loadPeriodFromManifest("P1"),
+        loadPeriodFromManifest("P3"),
+        loadPeriodFromManifest("P4"),
+        loadPeriodFromManifest("P5"),
+        loadPeriodFromManifest("P6"),
+      ]);
+      const [p1, p3, p4, p5, p6] = results;
+      setState(s => ({
+        ...s,
+        periods: { P1: p1, P3: p3, P4: p4, P5: p5, P6: p6 }
+      }));
+      setAssignments({
+        P1: padToSeats(p1),
+        P3: padToSeats(p3),
+        P4: padToSeats(p4),
+        P5: padToSeats(p5),
+        P6: padToSeats(p6),
+      });
+      alert("Rosters loaded from photo manifests.");
+    } catch (e: any) {
+      alert(e?.message || "Could not load one or more manifests.");
     }
   }
+  /* ---------- END ADDED ---------- */
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
@@ -224,69 +240,46 @@ export default function App() {
               Import JSON
               <input type="file" accept="application/json" onChange={importJSON} className="hidden" />
             </label>
+            {/* ---------- ADDED BUTTON TO LOAD FROM PHOTO MANIFESTS ---------- */}
+            <button onClick={loadRostersFromPhotos} className="px-3 py-1.5 rounded-xl border shadow-sm hover:bg-gray-50">
+              Load Rosters From Photos
+            </button>
+            {/* ---------- END ADDED ---------- */}
           </div>
         </div>
         <nav className="mx-auto max-w-6xl px-4 pb-3 flex gap-2">
           {PERIOD_KEYS.map(key => (
-            <button
-              key={key}
-              onClick={() => setActive(key)}
-              className={
-                "px-3 py-1.5 rounded-xl border text-sm " +
-                (active === key ? "bg-black text-white border-black" : "bg-white hover:bg-gray-50")
-              }
-            >
-              {state.titles[key]}
-            </button>
+            <button key={key} onClick={() => setActive(key)}
+              className={"px-3 py-1.5 rounded-xl border text-sm " + (active===key?"bg-black text-white border-black":"bg-white hover:bg-gray-50")}>{state.titles[key]}</button>
           ))}
         </nav>
       </header>
 
       <main className="mx-auto max-w-6xl px-4 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left: Seating chart */}
         <section className="lg:col-span-7">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-xl font-semibold">{state.titles[active]} — Seating</h2>
             <div className="flex items-center gap-2">
-              <button onClick={() => randomize(active)} className="px-3 py-1.5 rounded-xl bg-blue-600 text-white shadow hover:bg-blue-700">Randomize</button>
-              <button onClick={() => sortAlpha(active)} className="px-3 py-1.5 rounded-xl border shadow-sm hover:bg-gray-50">Sort A→Z</button>
-              <button onClick={downloadPNG} className="px-3 py-1.5 rounded-xl border shadow-sm hover:bg-gray-50">Download PNG</button>
-              <button onClick={() => window.print()} className="px-3 py-1.5 rounded-xl border shadow-sm hover:bg-gray-50">Print</button>
+              <button onClick={() => randomize(active)} className="px-3 py-1.5 rounded-xl bg-blue-600 text-white">Randomize</button>
+              <button onClick={() => sortAlpha(active)} className="px-3 py-1.5 rounded-xl border">Sort A→Z</button>
+              <button onClick={downloadPNG} className="px-3 py-1.5 rounded-xl border">Download PNG</button>
+              <button onClick={() => window.print()} className="px-3 py-1.5 rounded-xl border">Print</button>
             </div>
           </div>
 
-          {/* Grid: 6 rows × (8 visual columns with 2 spacers) */}
           <div id="chartCapture" className="bg-white rounded-2xl shadow p-4 border">
-            <div
-              className="grid"
-              style={{
-                gridTemplateColumns: "repeat(8, minmax(0, 1fr))",
-                columnGap: "12px",
-                rowGap: "12px",
-              }}
-            >
-              {/* Render 6 rows; for each row render 8 columns; spacers at visual col 2 and 5 */}
+            <div className="grid" style={{gridTemplateColumns:"repeat(8, minmax(0, 1fr))", columnGap:"12px", rowGap:"12px"}}>
               {Array.from({ length: ROWS }).map((_, r) => (
                 <React.Fragment key={r}>
                   {Array.from({ length: 8 }).map((__, vcol) => {
-                    const isSpacer = vcol === 2 || vcol === 5;
-                    if (isSpacer) return <div key={`s-${r}-${vcol}`} />;
-                    // Map visual col back to logical col 0..5
-                    let logicalCol = vcol;
-                    if (vcol >= 6) logicalCol = vcol - 2; // 6,7 → 4,5
-                    else if (vcol >= 3) logicalCol = vcol - 1; // 3,4 → 2,3
-                    const seatIndex = r * COLS + logicalCol;
-                    const seat = assignments[active][seatIndex] || null;
-                    return (
-                      <DeskCard
-                        key={`d-${r}-${vcol}`}
-                        student={seat}
-                        seatIndex={seatIndex}
-                        onDragStart={() => handleDragStart(seatIndex)}
-                        onDragOver={handleDragOver}
-                        onDrop={() => handleDrop(seatIndex)}
-                      />
-                    );
+                    if (vcol===2 || vcol===5) return <div key={`s-${r}-${vcol}`} />;
+                    let logicalCol = vcol; if (vcol>=6) logicalCol-=2; else if (vcol>=3) logicalCol-=1;
+                    const seatIndex = r*COLS+logicalCol;
+                    const seat = assignments[active][seatIndex]||null;
+                    return <DeskCard key={`d-${r}-${vcol}`} student={seat}
+                      onDragStart={()=>handleDragStart(seatIndex)}
+                      onDragOver={handleDragOver}
+                      onDrop={()=>handleDrop(seatIndex)} />;
                   })}
                 </React.Fragment>
               ))}
@@ -294,131 +287,49 @@ export default function App() {
           </div>
         </section>
 
-        {/* Right: Roster editor */}
         <section className="lg:col-span-5">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-xl font-semibold">{state.titles[active]} — Roster</h2>
-            <div className="flex items-center gap-2">
-              <button onClick={() => addStudent(active)} className="px-3 py-1.5 rounded-xl border shadow-sm hover:bg-gray-50">Add Student</button>
-            </div>
+            <button onClick={()=>addStudent(active)} className="px-3 py-1.5 rounded-xl border">Add Student</button>
           </div>
-
           <div className="bg-white rounded-2xl shadow border overflow-hidden">
             <table className="w-full text-sm">
-              <thead className="bg-gray-100">
-                <tr>
-                  <th className="text-left p-2 w-[36px]">#</th>
-                  <th className="text-left p-2">Name</th>
-                  <th className="text-left p-2">Photo URL</th>
-                  <th className="text-left p-2 w-[80px]">Actions</th>
-                </tr>
-              </thead>
+              <thead className="bg-gray-100"><tr><th className="p-2">#</th><th className="p-2">Name</th><th className="p-2">Photo URL</th><th className="p-2">Actions</th></tr></thead>
               <tbody>
-                {state.periods[active].length === 0 && (
-                  <tr><td colSpan={4} className="p-4 text-gray-500">No students yet. Paste below or add manually.</td></tr>
-                )}
-                {state.periods[active].map((s, i) => (
+                {state.periods[active].length===0 && <tr><td colSpan={4} className="p-4 text-gray-500">No students yet.</td></tr>}
+                {state.periods[active].map((s,i)=>(
                   <tr key={s.id} className="border-t">
-                    <td className="p-2 text-gray-500">{i + 1}</td>
-                    <td className="p-2">
-                      <input
-                        value={s.name}
-                        onChange={e => updateStudent(active, i, { name: e.target.value })}
-                        className="w-full px-2 py-1 rounded-lg border focus:outline-none focus:ring"
-                        placeholder="First Last"
-                      />
-                    </td>
-                    <td className="p-2">
-                      <input
-                        value={s.photo}
-                        onChange={e => updateStudent(active, i, { photo: e.target.value })}
-                        className="w-full px-2 py-1 rounded-lg border focus:outline-none focus:ring"
-                        placeholder="https://.../first_last.png"
-                      />
-                    </td>
-                    <td className="p-2">
-                      <button onClick={() => removeStudent(active, i)} className="px-2 py-1 rounded-lg border hover:bg-gray-50">
-                        Remove
-                      </button>
-                    </td>
+                    <td className="p-2 text-gray-500">{i+1}</td>
+                    <td className="p-2"><input value={s.name} onChange={e=>updateStudent(active,i,{name:e.target.value})} className="w-full border px-2 py-1"/></td>
+                    <td className="p-2"><input value={s.photo} onChange={e=>updateStudent(active,i,{photo:e.target.value})} className="w-full border px-2 py-1"/></td>
+                    <td className="p-2"><button onClick={()=>removeStudent(active,i)} className="px-2 py-1 border">Remove</button></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-
-          {/* Paste Wizard */}
           <div className="mt-4 bg-white rounded-2xl shadow border p-3">
             <div className="flex items-center justify-between mb-2">
               <h3 className="font-medium">Quick Paste Roster</h3>
-              <button onClick={() => applyPaste(active)} className="px-3 py-1.5 rounded-xl bg-black text-white hover:bg-gray-800">
-                Apply to {state.titles[active]}
-              </button>
+              <button onClick={()=>applyPaste(active)} className="px-3 py-1.5 rounded-xl bg-black text-white">Apply</button>
             </div>
-            <p className="text-xs text-gray-600 mb-2">
-              Paste one per line: <code>Name, PhotoURL</code> or just <code>Name</code>. Example:<br />
-              <code>Alex Smith, /images/alex_smith.png</code>
-            </p>
-            <textarea
-              value={pasteText}
-              onChange={e => setPasteText(e.target.value)}
-              rows={6}
-              className="w-full px-2 py-2 rounded-lg border focus:outline-none focus:ring font-mono text-xs"
-              placeholder={`First Last, /images/first_last.png\nFirst Last2, https://.../first_last2.png`}
-            />
+            <textarea value={pasteText} onChange={e=>setPasteText(e.target.value)} rows={6} className="w-full border px-2 py-2 font-mono text-xs"/>
           </div>
         </section>
       </main>
-
-      <footer className="mx-auto max-w-6xl px-4 py-8 text-xs text-gray-500">
-        <p>Fixed desk layout with spacer columns; local-only save; export/import; print- and PNG-friendly.</p>
-      </footer>
-
-      {/* Print Styles */}
-      <style>{`
-        @media print {
-          header, footer, .no-print { display: none !important; }
-          main { grid-template-columns: 1fr !important; }
-          section:nth-child(2) { display: none; }
-          body { background: white; }
-        }
-      `}</style>
     </div>
   );
 }
 
-function DeskCard({
-  student,
-  seatIndex,
-  onDragStart,
-  onDragOver,
-  onDrop,
-}: {
-  student: Student | null;
-  seatIndex: number;
-  onDragStart: () => void;
-  onDragOver: (e: React.DragEvent) => void;
-  onDrop: () => void;
-}) {
+function DeskCard({ student, onDragStart, onDragOver, onDrop }:{ student: Student|null; onDragStart:()=>void; onDragOver:(e:React.DragEvent)=>void; onDrop:()=>void }) {
   return (
-    <div
-      className="rounded-2xl border shadow-sm bg-white p-2 flex items-center gap-2 min-h-[88px]"
-      draggable={!!student}
-      onDragStart={onDragStart}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-      title={student?.name || ""}
-    >
+    <div className="rounded-2xl border shadow-sm bg-white p-2 flex items-center gap-2 min-h-[88px]"
+      draggable={!!student} onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop}>
       <div className="w-[64px] h-[64px] rounded-xl overflow-hidden bg-gray-100 flex items-center justify-center">
-        {student?.photo ? (
-          <img src={student.photo} alt={student.name} className="w-full h-full object-cover" />
-        ) : (
-          <div className="text-xs text-gray-400">No Photo</div>
-        )}
+        {student?.photo ? <img src={student.photo} alt={student.name} className="w-full h-full object-cover"/> : <div className="text-xs text-gray-400">No Photo</div>}
       </div>
       <div className="flex-1 min-w-0">
         <div className="font-medium truncate">{student?.name || "(empty)"}</div>
-        {student && <div className="text-[11px] text-gray-500 truncate">{student.id}</div>}
       </div>
     </div>
   );
