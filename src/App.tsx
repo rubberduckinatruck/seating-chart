@@ -613,14 +613,14 @@ function DeskCard(
 ) {
   return (
     <div
-      className="rounded-2xl border shadow-sm bg-white p-2 flex flex-col items-center justify-start min-h-[112px]"
+      className="rounded-2xl border shadow-sm bg-white p-1.8 flex flex-col items-center justify-start min-h-[128px]"
       draggable={!!student}
       onDragStart={onDragStart}
       onDragOver={onDragOver}
       onDrop={onDrop}
       title={student?.name || ""}  // full name on hover
     >
-      <div className="w-[64px] h-[64px] rounded-xl overflow-hidden bg-gray-100 flex items-center justify-center">
+      <div className="w-[88px] h-[88px] rounded-xl overflow-hidden bg-gray-100 flex items-center justify-center">
         {student?.photo
           ? <img src={student.photo} alt={student.name} className="w-full h-full object-cover"/>
           : <div className="text-xs text-gray-400">No Photo</div>}
