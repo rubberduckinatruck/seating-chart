@@ -471,11 +471,11 @@ export default function App() {
             <div
   className="grid"
   style={{
-    gridTemplateColumns:
-      "minmax(0,1fr) minmax(0,1fr) 24px minmax(0,1fr) minmax(0,1fr) 24px minmax(0,1fr) minmax(0,1fr)",
-    columnGap: "6px",
-    rowGap: "12px"
-  }}
+  gridTemplateColumns:
+    "minmax(180px,1fr) minmax(180px,1fr) 24px minmax(180px,1fr) minmax(180px,1fr) 24px minmax(180px,1fr) minmax(180px,1fr)",
+  columnGap: "6px",
+  rowGap: "12px"
+}}
 >
 
               {Array.from({ length: ROWS }).map((_, r) => (
