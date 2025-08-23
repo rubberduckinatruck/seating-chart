@@ -620,7 +620,7 @@ function DeskCard(
       onDrop={onDrop}
       title={student?.name || ""}  // full name on hover
     >
-      <div className="w-[64px] h-[88px] rounded-xl overflow-hidden bg-gray-100 flex items-center justify-center">
+      <div className="mt-2 w-[64px] h-[88px] rounded-xl overflow-hidden bg-gray-100 flex items-center justify-center">
         {student?.photo
           ? <img src={student.photo} alt={student.name} className="w-full h-full object-cover"/>
           : <div className="text-xs text-gray-400">No Photo</div>}
