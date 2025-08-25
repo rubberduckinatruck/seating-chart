@@ -260,19 +260,55 @@ export default function App() {
       { id, name: "First Last", photo: "" },
     ]);
   }
+
+  // PATCHED: seating-preserving student update (does not rebuild seats)
   function updateStudent(period: PeriodKey, idx: number, patch: Partial<Student>) {
-    const roster = state.periods[period].slice();
-    roster[idx] = { ...roster[idx], ...patch };
-    updatePeriod(period, roster);
+    setState(s => {
+      const roster = s.periods[period].slice();
+      const updated = { ...roster[idx], ...patch };
+      roster[idx] = updated;
+
+      // Mirror the edit into the current seat assignment by id, preserving positions
+      setAssignments(a => {
+        const arr = (a[period] ?? []).map(cell =>
+          cell && cell.id === updated.id ? { ...updated } : cell
+        );
+        return { ...a, [period]: arr };
+      });
+
+      return { ...s, periods: { ...s.periods, [period]: roster } };
+    });
   }
+
   function removeStudent(period: PeriodKey, idx: number) {
     const roster = state.periods[period].slice();
     roster.splice(idx, 1);
     updatePeriod(period, roster);
   }
+
+  // PATCHED: seating-preserving period update (keeps existing seats, fills gaps with new students)
   function updatePeriod(period: PeriodKey, roster: Roster) {
-    setState((s) => ({ ...s, periods: { ...s.periods, [period]: roster } }));
-    setAssignments((a) => ({ ...a, [period]: padToSeats(roster) }));
+    setState(s => ({ ...s, periods: { ...s.periods, [period]: roster } }));
+
+    setAssignments(a => {
+      const seatCount = ROWS * COLS;
+      const prev = (a[period] ?? []).slice(0, seatCount);
+      const byId = new Map(roster.map(s => [s.id, s]));
+
+      // Refresh seated students that still exist; clear seats of removed students
+      let next = prev.map(cell => (cell && byId.has(cell.id)) ? { ...byId.get(cell.id)! } : null);
+
+      // Place any new students into the first empty seats
+      const alreadyPlaced = new Set(next.filter(Boolean).map(s => (s as Student).id));
+      const newbies = roster.filter(s => !alreadyPlaced.has(s.id));
+      let ni = 0;
+      next = next.map(cell => cell ?? (newbies[ni++] ?? null));
+
+      // Pad to grid size
+      while (next.length < seatCount) next.push(null);
+
+      return { ...a, [period]: next };
+    });
   }
 
   // ---- Actions ----
