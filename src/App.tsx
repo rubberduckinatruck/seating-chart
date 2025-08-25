@@ -74,10 +74,10 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-function padToSeats(roster: Roster, seatCount = ROWS * COLS): (Student | null)[] {
-  const out: (Student | null)[] = roster.slice(0, seatCount);
-  while (out.length < seatCount) out.push(null);
-  return out;
+function padToSeats(input: (Student | null)[] | Roster, seatCount = ROWS * COLS): (Student | null)[] {
+  const arr = input.slice(0, seatCount) as (Student | null)[];
+  while (arr.length < seatCount) arr.push(null);
+  return arr;
 }
 
 /* ---------- ADDED HELPERS FOR PHOTO MANIFESTS (lowercase-only + base-aware) ---------- */
@@ -260,56 +260,46 @@ export default function App() {
       { id, name: "First Last", photo: "" },
     ]);
   }
-
-  // PATCHED: seating-preserving student update (does not rebuild seats)
   function updateStudent(period: PeriodKey, idx: number, patch: Partial<Student>) {
-    setState(s => {
-      const roster = s.periods[period].slice();
-      const updated = { ...roster[idx], ...patch };
-      roster[idx] = updated;
-
-      // Mirror the edit into the current seat assignment by id, preserving positions
-      setAssignments(a => {
-        const arr = (a[period] ?? []).map(cell =>
-          cell && cell.id === updated.id ? { ...updated } : cell
-        );
-        return { ...a, [period]: arr };
-      });
-
-      return { ...s, periods: { ...s.periods, [period]: roster } };
-    });
+    const roster = state.periods[period].slice();
+    roster[idx] = { ...roster[idx], ...patch };
+    updatePeriod(period, roster);
   }
-
   function removeStudent(period: PeriodKey, idx: number) {
     const roster = state.periods[period].slice();
     roster.splice(idx, 1);
     updatePeriod(period, roster);
   }
 
-  // PATCHED: seating-preserving period update (keeps existing seats, fills gaps with new students)
+  // ---------- PATCH: preserve seat placements when roster changes ----------
   function updatePeriod(period: PeriodKey, roster: Roster) {
-    setState(s => ({ ...s, periods: { ...s.periods, [period]: roster } }));
+    setState((s) => ({ ...s, periods: { ...s.periods, [period]: roster } }));
+    setAssignments((prev) => {
+      const prevSeats = prev[period] || [];
+      const byId = new Map(roster.map((st) => [st.id, st]));
+      const placed = new Set<string>();
 
-    setAssignments(a => {
-      const seatCount = ROWS * COLS;
-      const prev = (a[period] ?? []).slice(0, seatCount);
-      const byId = new Map(roster.map(s => [s.id, s]));
+      // keep current seat order where possible; update objects from roster
+      const nextSeats: (Student | null)[] = prevSeats.map((seat) => {
+        if (seat && byId.has(seat.id)) {
+          placed.add(seat.id);
+          return byId.get(seat.id)!; // updated name/photo preserved
+        }
+        return null; // freed seat (removed or new id)
+      });
 
-      // Refresh seated students that still exist; clear seats of removed students
-      let next = prev.map(cell => (cell && byId.has(cell.id)) ? { ...byId.get(cell.id)! } : null);
+      // put any new/unused roster students into first empty seats
+      for (const st of roster) {
+        if (!placed.has(st.id)) {
+          const empty = nextSeats.indexOf(null);
+          if (empty !== -1) nextSeats[empty] = st;
+        }
+      }
 
-      // Place any new students into the first empty seats
-      const alreadyPlaced = new Set(next.filter(Boolean).map(s => (s as Student).id));
-      const newbies = roster.filter(s => !alreadyPlaced.has(s.id));
-      let ni = 0;
-      next = next.map(cell => cell ?? (newbies[ni++] ?? null));
-
-      // Pad to grid size
-      while (next.length < seatCount) next.push(null);
-
-      return { ...a, [period]: next };
+      return { ...prev, [period]: padToSeats(nextSeats) };
     });
   }
+  // ------------------------------------------------------------------------
 
   // ---- Actions ----
   function randomize(period: PeriodKey) {
@@ -499,6 +489,17 @@ export default function App() {
       alert(`${bestConf} rule conflict(s) could not be satisfied; showing closest arrangement.`);
     }
   }
+
+  // ---------- NEW: validate current arrangement without randomizing ----------
+  function checkRulesNow() {
+    const arr = assignments[active];
+    const conflicts = countConflicts(arr, rulesFor(active));
+    if (conflicts === 0) {
+      alert("All rules are satisfied for the current arrangement.");
+    } else {
+      alert(`${conflicts} rule conflict(s) in the current arrangement.`);
+    }
+  }
   /* ---------- END rules editor helpers ---------- */
 
   // ---------- NEW: roster panel tab (Students | Rules) ----------
@@ -603,6 +604,12 @@ export default function App() {
                   className="px-3 py-1.5 rounded-xl bg-blue-600 text-white"
                 >
                   Randomize
+                </button>
+                <button
+                  onClick={() => checkRulesNow()}
+                  className="px-3 py-1.5 rounded-xl border"
+                >
+                  Check Rules
                 </button>
                 <button
                   onClick={() => sortAlpha(active)}
@@ -710,6 +717,13 @@ export default function App() {
           )}
 
           <div id="chartCapture" className="bg-white rounded-2xl shadow p-4 border">
+            {/* Label included in PNG/Print */}
+            <div className="flex items-center justify-center mb-2">
+              <div className="text-xs uppercase tracking-wider text-gray-500">
+                Front of classroom
+              </div>
+            </div>
+
             <div
               className="grid"
               style={{
