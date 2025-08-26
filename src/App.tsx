@@ -15,7 +15,7 @@ import { toPng } from "html-to-image";
  */
 
 const PERIOD_KEYS = ["p1", "p3", "p4", "p5", "p6"] as const;
-const DEFAULT_PERIOD_TITLES: Record<typeof PERIOD_KEYS[number], string> = {
+const DEFAULT_PERIOD_TITLES: Record<(typeof PERIOD_KEYS)[number], string> = {
   p1: "Period 1",
   p3: "Period 3",
   p4: "Period 4",
@@ -23,7 +23,7 @@ const DEFAULT_PERIOD_TITLES: Record<typeof PERIOD_KEYS[number], string> = {
   p6: "Period 6",
 };
 
-type PeriodKey = typeof PERIOD_KEYS[number];
+type PeriodKey = (typeof PERIOD_KEYS)[number];
 
 type Student = {
   id: string;
@@ -79,14 +79,17 @@ function shuffle<T>(arr: T[]): T[] {
   }
   return a;
 }
-function padToSeats(roster: Roster | (Student | null)[], seatCount = ROWS * COLS): (Student | null)[] {
+function padToSeats(
+  roster: Roster | (Student | null)[],
+  seatCount = ROWS * COLS
+): (Student | null)[] {
   const base = roster.slice(0, seatCount) as (Student | null)[];
   const out: (Student | null)[] = base;
   while (out.length < seatCount) out.push(null);
   return out;
 }
 
-/* ---------- Photo Manifests (lowercase-only + base-aware) ---------- */
+/* ---------- Photo manifests (lowercase-only + base-aware) ---------- */
 function stemToDisplay(stem: string) {
   return stem.replace(/_/g, " ");
 }
@@ -102,7 +105,7 @@ async function loadPeriodFromManifest(period: "p1" | "p3" | "p4" | "p5" | "p6") 
   const manifestUrl = joinBase("photos", folder, "index.json");
 
   const res = await fetch(manifestUrl, { cache: "no-store" });
-  if (!res.ok) throw new Error(${period} manifest not found);
+  if (!res.ok) throw new Error(`${period} manifest not found`);
 
   const files: string[] = await res.json();
   const basePath = joinBase("photos", folder) + "/";
@@ -113,7 +116,7 @@ async function loadPeriodFromManifest(period: "p1" | "p3" | "p4" | "p5" | "p6") 
       id: stem,
       name: stemToDisplay(stem),
       photo: basePath + filename,
-      tags: [], // ensure new students have tags: []
+      tags: [],
     } as Student;
   });
 }
@@ -127,21 +130,17 @@ function indexToRowCol(idx: number) {
 function pairKeyForIndex(idx: number) {
   const { row, col } = indexToRowCol(idx);
   const pair = Math.floor(col / 2);
-  return ${row}-${pair};
+  return `${row}-${pair}`;
 }
 function findSeatIndexById(arr: (Student | null)[], id: string): number {
   return arr.findIndex((s) => s && s.id === id);
 }
-
-/** UPDATED: counts classic rule conflicts + seatTag mismatches (ANY-of match) */
 function countConflicts(
   arr: (Student | null)[],
   rules: PeriodRules,
   seatTags?: (string[] | null)[]
 ): number {
   let conflicts = 0;
-
-  // Classic apart/together rule checks
   for (const r of rules.apart) {
     if (!r.aId || !r.bId) continue;
     const ai = findSeatIndexById(arr, r.aId);
@@ -160,25 +159,23 @@ function countConflicts(
     if (pairKeyForIndex(ai) !== pairKeyForIndex(bi)) conflicts++;
   }
 
-  // NEW: seat tag mismatches (lenient ANY-of)
+  // NEW: seat tag mismatches (ANY-of match; empty seat = no conflict)
   if (seatTags && seatTags.length === ROWS * COLS) {
     for (let i = 0; i < seatTags.length; i++) {
-      const seatReq = seatTags[i];
-      if (!seatReq || seatReq.length === 0) continue; // no restriction
-      const occupant = arr[i];
-      if (!occupant) continue; // empty seat doesn't count as conflict
-      const studentTags = Array.isArray(occupant.tags) ? occupant.tags : [];
-      // normalize to lower case for comparison
-      const req = seatReq.map((t) => (t || "").trim().toLowerCase()).filter(Boolean);
-      const have = studentTags.map((t) => (t || "").trim().toLowerCase()).filter(Boolean);
-      let overlap = false;
-      for (const t of req) {
+      const req = seatTags[i];
+      if (!req || req.length === 0) continue;
+      const occ = arr[i];
+      if (!occ) continue;
+      const have = (occ.tags || []).map((t) => t.trim().toLowerCase()).filter(Boolean);
+      const need = req.map((t) => (t || "").trim().toLowerCase()).filter(Boolean);
+      let ok = false;
+      for (const t of need) {
         if (have.includes(t)) {
-          overlap = true;
+          ok = true;
           break;
         }
       }
-      if (!overlap) conflicts++;
+      if (!ok) conflicts++;
     }
   }
 
@@ -203,7 +200,6 @@ const EMPTY_STATE: AppState = {
     p5: [],
     p6: [],
   },
-  // NEW: default seat tags (each period gets ROWS*COLS entries; [] = no restriction)
   seatTags: {
     p1: Array(ROWS * COLS).fill([]),
     p3: Array(ROWS * COLS).fill([]),
@@ -227,13 +223,10 @@ function ensureRulesShape(s: AppState | null): AppState {
     base.rules[k].apart ||= [];
     base.rules[k].together ||= [];
     base.seats[k] ||= [];
-    // ensure seatTags shape & fill with [] where missing
     const current = base.seatTags[k];
     if (!Array.isArray(current) || current.length !== ROWS * COLS) {
       const arr: (string[] | null)[] = Array(ROWS * COLS);
-      for (let i = 0; i < ROWS * COLS; i++) {
-        arr[i] = [];
-      }
+      for (let i = 0; i < ROWS * COLS; i++) arr[i] = [];
       base.seatTags[k] = arr;
     } else {
       base.seatTags[k] = current.map((v) => (v == null ? [] : v));
@@ -289,11 +282,11 @@ export default function App() {
   const initialAssignments = useMemo(() => {
     const rec: Record<PeriodKey, (Student | null)[]> = {} as any;
     for (const k of PERIOD_KEYS) {
-      const persisted = (state.seats?.[k] ?? []).filter((s) => s === null || typeof s === "object");
+      const persisted = (state.seats?.[k] ?? []).filter(
+        (s) => s === null || typeof s === "object"
+      );
       rec[k] =
-        persisted.length === ROWS * COLS
-          ? persisted
-          : padToSeats(state.periods[k]);
+        persisted.length === ROWS * COLS ? persisted : padToSeats(state.periods[k]);
     }
     return rec;
   }, []); // run once on mount
@@ -323,7 +316,7 @@ export default function App() {
 
   /* ---------- Roster editing ---------- */
   function addStudent(period: PeriodKey) {
-    const id = student_${Date.now()};
+    const id = `student_${Date.now()}`;
     const newStudent: Student = { id, name: "First Last", photo: "", tags: [] };
     setState((s) => ({
       ...s,
@@ -347,7 +340,6 @@ export default function App() {
   }
 
   function updateStudent(period: PeriodKey, idx: number, patch: Partial<Student>) {
-    // Normalize tags if provided as a delimited string (from input)
     const p2: Partial<Student> = { ...patch };
     if (typeof (p2 as any).tags === "string") {
       (p2 as any).tags = normalizeTagsInput((p2 as any).tags);
@@ -380,7 +372,6 @@ export default function App() {
       roster.splice(idx, 1);
       return { ...s, periods: { ...s.periods, [period]: roster } };
     });
-    // Remove from seat map but keep everyone else in place
     if (toRemove) {
       setAssignments((a) => {
         const arr = a[period].map((seat) =>
@@ -392,14 +383,11 @@ export default function App() {
   }
 
   function updatePeriod(period: PeriodKey, roster: Roster) {
-    // Only used by JSON import/paste wizard; keep seats as close as possible
     setState((s) => ({ ...s, periods: { ...s.periods, [period]: roster } }));
-    // Try to map existing seats by id to the new roster; unknowns become null;
     setAssignments((a) => {
       const arr = a[period].map((seat) =>
         seat && roster.find((r) => r.id === seat.id) ? seat : null
       );
-      // fill remaining roster items not already seated into empty spots
       const seatedIds = new Set(arr.filter(Boolean).map((s) => (s as Student).id));
       for (const r of roster) {
         if (!seatedIds.has(r.id)) {
@@ -422,7 +410,6 @@ export default function App() {
     roster.sort((a, b) =>
       (a.name?.split(/\s+/)[0] || "").localeCompare(b.name?.split(/\s+/)[0] || "")
     );
-    // Just reorder roster list; DO NOT reseat automatically
     setState((s) => ({ ...s, periods: { ...s.periods, [period]: roster } }));
   }
 
@@ -449,7 +436,7 @@ export default function App() {
     const dataUrl = await toPng(node as HTMLElement, { pixelRatio: 2 });
     const a = document.createElement("a");
     a.href = dataUrl;
-    a.download = ${state.titles[active].replace(/\s+/g, "_").toLowerCase()}_seating.png;
+    a.download = `${state.titles[active].replace(/\s+/g, "_").toLowerCase()}_seating.png`;
     a.click();
   }
 
@@ -513,7 +500,8 @@ export default function App() {
               .map((t) => t.trim().toLowerCase())
               .filter(Boolean)
           : [];
-      const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "_") || s_${i};
+      const id =
+        name.toLowerCase().replace(/[^a-z0-9]+/g, "_") || `s_${i}`;
       return { id, name, photo, tags };
     });
     updatePeriod(period, roster);
@@ -533,11 +521,12 @@ export default function App() {
       const [p1, p3, p4, p5, p6] = results;
       const nextPeriods = { p1, p3, p4, p5, p6 } as Record<PeriodKey, Roster>;
       setState((s) => ({ ...s, periods: nextPeriods }));
-      // Keep current seat shapes; fill empty spots with new names where possible
       setAssignments((a) => {
         const out: Record<PeriodKey, (Student | null)[]> = { ...a };
         for (const k of PERIOD_KEYS) {
-          const seated = new Set(out[k].filter(Boolean).map((s) => (s as Student).id));
+          const seated = new Set(
+            out[k].filter(Boolean).map((s) => (s as Student).id)
+          );
           for (const stu of nextPeriods[k]) {
             if (!seated.has(stu.id)) {
               const empty = out[k].findIndex((x) => x === null);
@@ -594,7 +583,7 @@ export default function App() {
     setRules(period, { ...r, together: next });
   }
 
-  // Manual “apply rules”: randomize attempting to satisfy rules (no auto changes while editing)
+  // Manual “apply rules”: randomize attempting to satisfy rules (includes seat tags)
   function randomizeWithRules(period: PeriodKey) {
     const roster = state.periods[period];
     const rules = rulesFor(period);
@@ -615,13 +604,23 @@ export default function App() {
     }
     setAssignments((a) => ({ ...a, [period]: best }));
     if (bestConf > 0) {
-      alert(${bestConf} rule conflict(s) could not be satisfied; showing closest arrangement.);
+      alert(
+        `${bestConf} rule conflict(s) could not be satisfied; showing closest arrangement.`
+      );
     }
   }
 
   function checkConflicts(period: PeriodKey) {
-    const conflicts = countConflicts(assignments[period], rulesFor(period), state.seatTags[period]);
-    alert(conflicts === 0 ? "No rule/seat-tag conflicts in the current layout." : ${conflicts} conflict(s) detected.);
+    const conflicts = countConflicts(
+      assignments[period],
+      rulesFor(period),
+      state.seatTags[period]
+    );
+    alert(
+      conflicts === 0
+        ? "No rule/seat-tag conflicts in the current layout."
+        : `${conflicts} conflict(s) detected.`
+    );
   }
 
   /* ---------- UI state ---------- */
@@ -629,7 +628,7 @@ export default function App() {
   const [layoutOpen, setLayoutOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [studentsOpen, setStudentsOpen] = useState(false);
-  const [seatTagsOpen, setSeatTagsOpen] = useState(false); // NEW: Seat Tags panel toggle
+  const [seatTagsOpen, setSeatTagsOpen] = useState(false);
   useEffect(() => {
     try {
       localStorage.setItem(LAYOUT_LS_KEY, JSON.stringify(layout));
@@ -640,19 +639,18 @@ export default function App() {
     setLayout(DEFAULT_LAYOUT);
   }
 
-  const seatCol = ${layout.cardWidth}px;
+  const seatCol = `${layout.cardWidth}px`;
   const gridTemplateColumns = [
     seatCol,
     seatCol,
-    ${layout.pairGap}px,
+    `${layout.pairGap}px`,
     seatCol,
     seatCol,
-    ${layout.pairGap}px,
+    `${layout.pairGap}px`,
     seatCol,
     seatCol,
   ].join(" ");
 
-  // Helpers for editing seat tags
   function seatTagStringAt(period: PeriodKey, idx: number): string {
     const val = state.seatTags[period][idx];
     if (!val || val.length === 0) return "";
@@ -672,7 +670,7 @@ export default function App() {
     <div className="min-h-screen bg-gray-50 text-gray-900">
       {/* PRINT CSS: print only the chartCapture, single page */}
       <style>
-        {
+        {`
         @media print {
           @page { size: letter landscape; margin: 0.5in; }
           body * { visibility: hidden !important; }
@@ -685,7 +683,7 @@ export default function App() {
           }
           html, body { background: #ffffff !important; }
         }
-      }
+        `}
       </style>
 
       {/* Header: single-line title + period tabs + load photos button */}
@@ -703,7 +701,9 @@ export default function App() {
                   onClick={() => setActive(key)}
                   className={
                     "px-3 py-1.5 rounded-xl border text-sm " +
-                    (active === key ? "bg-black text-white border-black" : "bg-white hover:bg-gray-50")
+                    (active === key
+                      ? "bg-black text-white border-black"
+                      : "bg-white hover:bg-gray-50")
                   }
                 >
                   {state.titles[key]}
@@ -731,7 +731,10 @@ export default function App() {
             >
               Randomize
             </button>
-            <button onClick={() => sortAlpha(active)} className="px-3 py-1.5 rounded-xl border">
+            <button
+              onClick={() => sortAlpha(active)}
+              className="px-3 py-1.5 rounded-xl border"
+            >
               Sort A→Z
             </button>
             <button onClick={downloadPNG} className="px-3 py-1.5 rounded-xl border">
@@ -746,23 +749,32 @@ export default function App() {
             {/* Toggle Students panel (roster) */}
             <button
               onClick={() => setStudentsOpen((v) => !v)}
-              className={"px-3 py-1.5 rounded-xl border " + (studentsOpen ? "bg-black text-white" : "bg-white")}
+              className={
+                "px-3 py-1.5 rounded-xl border " +
+                (studentsOpen ? "bg-black text-white" : "bg-white")
+              }
               title="Edit roster (names)"
             >
               Students
             </button>
-            {/* Toggle Rules panel (top, formatted like Layout) */}
+            {/* Toggle Rules panel */}
             <button
               onClick={() => setRulesOpen((v) => !v)}
-              className={"px-3 py-1.5 rounded-xl border " + (rulesOpen ? "bg-black text-white" : "bg-white")}
+              className={
+                "px-3 py-1.5 rounded-xl border " +
+                (rulesOpen ? "bg-black text-white" : "bg-white")
+              }
               title="Edit rules (keep apart / keep together)"
             >
               Rules
             </button>
-            {/* NEW: Toggle Seat Tags panel (teacher-only; outside chartCapture) */}
+            {/* NEW: Toggle Seat Tags panel */}
             <button
               onClick={() => setSeatTagsOpen((v) => !v)}
-              className={"px-3 py-1.5 rounded-xl border " + (seatTagsOpen ? "bg-black text-white" : "bg-white")}
+              className={
+                "px-3 py-1.5 rounded-xl border " +
+                (seatTagsOpen ? "bg-black text-white" : "bg-white")
+              }
               title="Seat Tags (teacher-only constraints)"
             >
               Seat Tags
@@ -770,7 +782,10 @@ export default function App() {
             {/* Toggle Layout panel */}
             <button
               onClick={() => setLayoutOpen((v) => !v)}
-              className={"px-3 py-1.5 rounded-xl border " + (layoutOpen ? "bg-black text-white" : "bg-white")}
+              className={
+                "px-3 py-1.5 rounded-xl border " +
+                (layoutOpen ? "bg-black text-white" : "bg-white")
+              }
               title="Layout settings (spacing & sizes)"
             >
               Layout
@@ -778,12 +793,17 @@ export default function App() {
           </div>
         </div>
 
-        {/* STUDENTS (roster) PANEL — collapsed until opened */}
+        {/* STUDENTS (roster) PANEL */}
         {studentsOpen && (
           <section className="bg-white rounded-2xl shadow border p-3">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-xl font-semibold">{state.titles[active]} — Students</h2>
-              <button onClick={() => addStudent(active)} className="px-3 py-1.5 rounded-xl border">
+              <h2 className="text-xl font-semibold">
+                {state.titles[active]} — Students
+              </h2>
+              <button
+                onClick={() => addStudent(active)}
+                className="px-3 py-1.5 rounded-xl border"
+              >
                 Add Student
               </button>
             </div>
@@ -793,7 +813,6 @@ export default function App() {
                   <tr>
                     <th className="p-2">#</th>
                     <th className="p-2">Name</th>
-                    {/* NEW: Tags column */}
                     <th className="p-2">Tags (;-separated)</th>
                     <th className="p-2">Actions</th>
                   </tr>
@@ -812,15 +831,18 @@ export default function App() {
                       <td className="p-2">
                         <input
                           value={s.name}
-                          onChange={(e) => updateStudent(active, i, { name: e.target.value })}
+                          onChange={(e) =>
+                            updateStudent(active, i, { name: e.target.value })
+                          }
                           className="w-full border px-2 py-1"
                         />
                       </td>
-                      {/* NEW: Editable tags field (hidden from chart/print; teacher-only UI here) */}
                       <td className="p-2">
                         <input
                           value={(s.tags || []).join("; ")}
-                          onChange={(e) => updateStudent(active, i, { tags: e.target.value })}
+                          onChange={(e) =>
+                            updateStudent(active, i, { tags: e.target.value })
+                          }
                           className="w-full border px-2 py-1"
                           placeholder="iep; 504; el"
                         />
@@ -839,7 +861,7 @@ export default function App() {
               </table>
             </div>
 
-            {/* Quick Paste (unchanged except paste handler now supports optional tags) */}
+            {/* Quick Paste */}
             <div className="mt-4 bg-white rounded-2xl border p-3">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="font-medium">Quick Paste Roster</h3>
@@ -857,13 +879,14 @@ export default function App() {
                 className="w-full border px-2 py-2 font-mono text-xs"
               />
               <div className="text-xs text-gray-500 mt-1">
-                Format per line: <code>Name, photoURL, tag1;tag2</code> (tags optional)
+                Format per line: <code>Name, photoURL, tag1;tag2</code> (tags
+                optional)
               </div>
             </div>
           </section>
         )}
 
-        {/* RULES PANEL (collapsible, matches layout style) */}
+        {/* RULES PANEL */}
         {rulesOpen && (
           <div className="mb-2 bg-white rounded-2xl shadow border p-3">
             <div className="space-y-6">
@@ -875,11 +898,16 @@ export default function App() {
                 </p>
                 <div className="space-y-2">
                   {rulesFor(active).apart.map((r, i) => (
-                    <div key={apart-${i}} className="flex flex-wrap items-center gap-2">
+                    <div
+                      key={`apart-${i}`}
+                      className="flex flex-wrap items-center gap-2"
+                    >
                       <select
                         className="border rounded-lg px-2 py-1 flex-1 min-w-[200px]"
                         value={r.aId}
-                        onChange={(e) => updateApart(active, i, { aId: e.target.value })}
+                        onChange={(e) =>
+                          updateApart(active, i, { aId: e.target.value })
+                        }
                       >
                         <option value="">— Select —</option>
                         {state.periods[active].map((s) => (
@@ -890,9 +918,11 @@ export default function App() {
                       </select>
                       <span className="text-gray-500">and</span>
                       <select
-                        className="border rounded-lg px-2 py-1 flex-1 min-w-[200px]"
+                        className="border rounded-lg px-2 py-1 flex-1 min-w=[200px]"
                         value={r.bId}
-                        onChange={(e) => updateApart(active, i, { bId: e.target.value })}
+                        onChange={(e) =>
+                          updateApart(active, i, { bId: e.target.value })
+                        }
                       >
                         <option value="">— Select —</option>
                         {state.periods[active].map((s) => (
@@ -901,7 +931,10 @@ export default function App() {
                           </option>
                         ))}
                       </select>
-                      <button className="px-2 py-1 border rounded-lg" onClick={() => removeApart(active, i)}>
+                      <button
+                        className="px-2 py-1 border rounded-lg"
+                        onClick={() => removeApart(active, i)}
+                      >
                         Remove
                       </button>
                     </div>
@@ -923,11 +956,16 @@ export default function App() {
                 </p>
                 <div className="space-y-2">
                   {rulesFor(active).together.map((r, i) => (
-                    <div key={together-${i}} className="flex flex-wrap items-center gap-2">
+                    <div
+                      key={`together-${i}`}
+                      className="flex flex-wrap items-center gap-2"
+                    >
                       <select
                         className="border rounded-lg px-2 py-1 flex-1 min-w-[200px]"
                         value={r.aId}
-                        onChange={(e) => updateTogether(active, i, { aId: e.target.value })}
+                        onChange={(e) =>
+                          updateTogether(active, i, { aId: e.target.value })
+                        }
                       >
                         <option value="">— Select —</option>
                         {state.periods[active].map((s) => (
@@ -940,7 +978,9 @@ export default function App() {
                       <select
                         className="border rounded-lg px-2 py-1 flex-1 min-w-[200px]"
                         value={r.bId}
-                        onChange={(e) => updateTogether(active, i, { bId: e.target.value })}
+                        onChange={(e) =>
+                          updateTogether(active, i, { bId: e.target.value })
+                        }
                       >
                         <option value="">— Select —</option>
                         {state.periods[active].map((s) => (
@@ -949,7 +989,10 @@ export default function App() {
                           </option>
                         ))}
                       </select>
-                      <button className="px-2 py-1 border rounded-lg" onClick={() => removeTogether(active, i)}>
+                      <button
+                        className="px-2 py-1 border rounded-lg"
+                        onClick={() => removeTogether(active, i)}
+                      >
                         Remove
                       </button>
                     </div>
@@ -984,9 +1027,13 @@ export default function App() {
         {/* NEW: SEAT TAGS PANEL (teacher-only, not inside #chartCapture) */}
         {seatTagsOpen && (
           <div className="mb-2 bg-white rounded-2xl shadow border p-3 no-print">
-            <h3 className="font-semibold mb-2">Seat Tags — {state.titles[active]}</h3>
+            <h3 className="font-semibold mb-2">
+              Seat Tags — {state.titles[active]}
+            </h3>
             <p className="text-sm text-gray-600 mb-3">
-              Enter <span className="font-mono">;-separated</span> tags per seat. Empty = no restriction. A student matches if they have <em>any</em> of the seat’s tags.
+              Enter <span className="font-mono">;-separated</span> tags per
+              seat. Empty = no restriction. A student matches if they have{" "}
+              <em>any</em> of the seat’s tags.
             </p>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -1004,12 +1051,16 @@ export default function App() {
                     return (
                       <tr key={i} className="border-t">
                         <td className="p-2">{i + 1}</td>
-                        <td className="p-2">{rc.row + 1}, {pair + 1}</td>
+                        <td className="p-2">
+                          {rc.row + 1}, {pair + 1}
+                        </td>
                         <td className="p-2">
                           <input
                             className="w-full border px-2 py-1"
                             value={seatTagStringAt(active, i)}
-                            onChange={(e) => updateSeatTagAt(active, i, e.target.value)}
+                            onChange={(e) =>
+                              updateSeatTagAt(active, i, e.target.value)
+                            }
                             placeholder="iep; 504; el"
                           />
                         </td>
@@ -1037,54 +1088,75 @@ export default function App() {
           </div>
         )}
 
-        {/* LAYOUT PANEL (collapsible) */}
+        {/* LAYOUT PANEL */}
         {layoutOpen && (
           <div className="mb-2 bg-white rounded-2xl shadow border p-3">
             <div className="flex flex-wrap gap-4">
               <NumberField
                 label="Within-pair gap (px)"
                 value={layout.withinPairGap}
-                onChange={(v) => setLayout({ ...layout, withinPairGap: clampInt(v, 0, 64) })}
+                onChange={(v) =>
+                  setLayout({ ...layout, withinPairGap: clampInt(v, 0, 64) })
+                }
               />
               <NumberField
                 label="Between-pairs gap (px)"
                 value={layout.pairGap}
-                onChange={(v) => setLayout({ ...layout, pairGap: clampInt(v, 0, 120) })}
+                onChange={(v) =>
+                  setLayout({ ...layout, pairGap: clampInt(v, 0, 120) })
+                }
               />
               <NumberField
                 label="Row gap (px)"
                 value={layout.rowGap}
-                onChange={(v) => setLayout({ ...layout, rowGap: clampInt(v, 0, 64) })}
+                onChange={(v) =>
+                  setLayout({ ...layout, rowGap: clampInt(v, 0, 64) })
+                }
               />
               <NumberField
                 label="Card width (px)"
                 value={layout.cardWidth}
-                onChange={(v) => setLayout({ ...layout, cardWidth: clampInt(v, 80, 220) })}
+                onChange={(v) =>
+                  setLayout({ ...layout, cardWidth: clampInt(v, 80, 220) })
+                }
               />
               <NumberField
                 label="Card min-height (px)"
                 value={layout.cardMinHeight}
-                onChange={(v) => setLayout({ ...layout, cardMinHeight: clampInt(v, 120, 260) })}
+                onChange={(v) =>
+                  setLayout({ ...layout, cardMinHeight: clampInt(v, 120, 260) })
+                }
               />
               <NumberField
                 label="Card padding (px)"
                 value={layout.cardPadding}
-                onChange={(v) => setLayout({ ...layout, cardPadding: clampInt(v, 4, 20) })}
+                onChange={(v) =>
+                  setLayout({ ...layout, cardPadding: clampInt(v, 4, 20) })
+                }
               />
               <NumberField
                 label="Photo width (px)"
                 value={layout.photoWidth}
-                onChange={(v) => setLayout({ ...layout, photoWidth: clampInt(v, 60, layout.cardWidth - 8) })}
+                onChange={(v) =>
+                  setLayout({
+                    ...layout,
+                    photoWidth: clampInt(v, 60, layout.cardWidth - 8),
+                  })
+                }
               />
               <NumberField
                 label="Photo height (px)"
                 value={layout.photoHeight}
-                onChange={(v) => setLayout({ ...layout, photoHeight: clampInt(v, 60, 240) })}
+                onChange={(v) =>
+                  setLayout({ ...layout, photoHeight: clampInt(v, 60, 240) })
+                }
               />
               <NumberField
                 label="Photo top margin (px)"
                 value={layout.photoTopMargin}
-                onChange={(v) => setLayout({ ...layout, photoTopMargin: clampInt(v, 0, 24) })}
+                onChange={(v) =>
+                  setLayout({ ...layout, photoTopMargin: clampInt(v, 0, 24) })
+                }
               />
             </div>
             <div className="mt-3">
@@ -1096,27 +1168,31 @@ export default function App() {
         )}
 
         {/* CHART (centered) */}
-        <div id="chartCapture" className="bg-white rounded-2xl shadow p-4 border mx-auto w-full">
-          {/* Title included in PNG and Print */}
+        <div
+          id="chartCapture"
+          className="bg-white rounded-2xl shadow p-4 border mx-auto w-full"
+        >
           <div className="text-center text-xl font-semibold mb-2">
             {state.titles[active]} — Seating Chart
           </div>
-          {/* Front of classroom label */}
-          <div className="text-center text-xs text-gray-500 mb-2">Front of classroom</div>
+          <div className="text-center text-xs text-gray-500 mb-2">
+            Front of classroom
+          </div>
 
           <div
             className="grid"
             style={{
               gridTemplateColumns, // 2 seats + spacer + 2 seats + spacer + 2 seats
-              columnGap: ${layout.withinPairGap}px,
-              rowGap: ${layout.rowGap}px,
+              columnGap: `${layout.withinPairGap}px`,
+              rowGap: `${layout.rowGap}px`,
               justifyContent: "center" as const,
             }}
           >
             {Array.from({ length: ROWS }).map((_, r) => (
               <React.Fragment key={r}>
                 {Array.from({ length: 8 }).map((__, vcol) => {
-                  if (vcol === 2 || vcol === 5) return <div key={s-${r}-${vcol}} />;
+                  if (vcol === 2 || vcol === 5)
+                    return <div key={`s-${r}-${vcol}`} />;
                   let logicalCol = vcol;
                   if (vcol >= 6) logicalCol -= 2;
                   else if (vcol >= 3) logicalCol -= 1;
@@ -1124,7 +1200,7 @@ export default function App() {
                   const seat = assignments[active][seatIndex] || null;
                   return (
                     <DeskCard
-                      key={d-${r}-${vcol}}
+                      key={`d-${r}-${vcol}`}
                       student={seat}
                       onDragStart={() => handleDragStart(seatIndex)}
                       onDragOver={handleDragOver}
@@ -1194,9 +1270,9 @@ function DeskCard({
     <div
       className="rounded-2xl border shadow-sm bg-white flex flex-col items-center justify-start"
       style={{
-        width: ${layout.cardWidth}px,
-        minHeight: ${layout.cardMinHeight}px,
-        padding: ${layout.cardPadding}px,
+        width: `${layout.cardWidth}px`,
+        minHeight: `${layout.cardMinHeight}px`,
+        padding: `${layout.cardPadding}px`,
       }}
       draggable={!!student}
       onDragStart={onDragStart}
@@ -1207,13 +1283,17 @@ function DeskCard({
       <div
         className="rounded-xl overflow-hidden bg-gray-100 flex items-center justify-center"
         style={{
-          width: ${layout.photoWidth}px,
-          height: ${layout.photoHeight}px,
-          marginTop: ${layout.photoTopMargin}px,
+          width: `${layout.photoWidth}px`,
+          height: `${layout.photoHeight}px`,
+          marginTop: `${layout.photoTopMargin}px`,
         }}
       >
         {student?.photo ? (
-          <img src={student.photo} alt={student.name} className="w-full h-full object-cover" />
+          <img
+            src={student.photo}
+            alt={student.name}
+            className="w-full h-full object-cover"
+          />
         ) : (
           <div className="text-xs text-gray-400">No Photo</div>
         )}
