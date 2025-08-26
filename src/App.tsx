@@ -403,7 +403,6 @@ export default function App() {
         const incoming = JSON.parse(String(reader.result));
         if (incoming?.periods && incoming?.titles) {
           const normalized = ensureRulesShape(incoming);
-          // If seats are in the incoming, prefer those; otherwise keep current seats
           const nextSeats: AppState["seats"] = { ...state.seats };
           for (const k of PERIOD_KEYS) {
             nextSeats[k] =
@@ -548,6 +547,7 @@ export default function App() {
   const [layout, setLayout] = useState<LayoutSettings>(() => loadLayout());
   const [layoutOpen, setLayoutOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [studentsOpen, setStudentsOpen] = useState(false);
   useEffect(() => {
     try {
       localStorage.setItem(LAYOUT_LS_KEY, JSON.stringify(layout));
@@ -579,7 +579,7 @@ export default function App() {
           @page { size: letter landscape; margin: 0.5in; }
           body * { visibility: hidden !important; }
           #chartCapture, #chartCapture * { visibility: visible !important; }
-          header, nav, .no-print, .print-hide { display: none !important; }
+          header, .no-print, .print-hide { display: none !important; }
           #chartCapture {
             position: absolute; left: 0; top: 0;
             width: 100% !important; max-width: 100% !important;
@@ -590,34 +590,36 @@ export default function App() {
       `}
       </style>
 
-      {/* Header: single-line title + (optional) load photos button; NO subtitle/export/import */}
+      {/* Header: single-line title + period tabs + load photos button */}
       <header className="sticky top-0 z-10 bg-white border-b">
-        <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between whitespace-nowrap">
-          <span className="text-2xl font-bold">Seating Chart</span>
-          <div className="flex items-center gap-2">
+        <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between gap-3 whitespace-nowrap overflow-x-auto">
+          {/* Left: Title */}
+          <span className="text-2xl font-bold shrink-0">Seating Chart</span>
+
+          {/* Center + Right: Period tabs + Load button (all one line, scrollable if needed) */}
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex items-center gap-2 overflow-x-auto">
+              {PERIOD_KEYS.map((key) => (
+                <button
+                  key={key}
+                  onClick={() => setActive(key)}
+                  className={
+                    "px-3 py-1.5 rounded-xl border text-sm " +
+                    (active === key ? "bg-black text-white border-black" : "bg-white hover:bg-gray-50")
+                  }
+                >
+                  {state.titles[key]}
+                </button>
+              ))}
+            </div>
             <button
               onClick={loadRostersFromPhotos}
-              className="px-3 py-1.5 rounded-xl border shadow-sm hover:bg-gray-50"
+              className="px-3 py-1.5 rounded-xl border shadow-sm hover:bg-gray-50 shrink-0"
             >
               Load Rosters From Photos
             </button>
           </div>
         </div>
-        {/* Period tabs (single line) */}
-        <nav className="mx-auto max-w-6xl px-4 pb-3 flex gap-2 overflow-x-auto no-print">
-          {PERIOD_KEYS.map((key) => (
-            <button
-              key={key}
-              onClick={() => setActive(key)}
-              className={
-                "px-3 py-1.5 rounded-xl border text-sm " +
-                (active === key ? "bg-black text-white border-black" : "bg-white hover:bg-gray-50")
-              }
-            >
-              {state.titles[key]}
-            </button>
-          ))}
-        </nav>
       </header>
 
       {/* MAIN */}
@@ -625,7 +627,6 @@ export default function App() {
         {/* Unified toolbar above the chart */}
         <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
           <div className="flex items-center gap-2">
-            {/* Randomize uses rules manually when you want */}
             <button
               onClick={() => randomizeWithRules(active)}
               className="px-3 py-1.5 rounded-xl bg-blue-600 text-white"
@@ -644,6 +645,14 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Toggle Students panel (roster) */}
+            <button
+              onClick={() => setStudentsOpen((v) => !v)}
+              className={"px-3 py-1.5 rounded-xl border " + (studentsOpen ? "bg-black text-white" : "bg-white")}
+              title="Edit roster (names)"
+            >
+              Students
+            </button>
             {/* Toggle Rules panel (top, formatted like Layout) */}
             <button
               onClick={() => setRulesOpen((v) => !v)}
@@ -662,6 +671,77 @@ export default function App() {
             </button>
           </div>
         </div>
+
+        {/* STUDENTS (roster) PANEL — collapsed until opened */}
+        {studentsOpen && (
+          <section className="bg-white rounded-2xl shadow border p-3">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xl font-semibold">{state.titles[active]} — Students</h2>
+              <button onClick={() => addStudent(active)} className="px-3 py-1.5 rounded-xl border">
+                Add Student
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-100">
+                  <tr>
+                    <th className="p-2">#</th>
+                    <th className="p-2">Name</th>
+                    <th className="p-2">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {state.periods[active].length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="p-4 text-gray-500">
+                        No students yet.
+                      </td>
+                    </tr>
+                  )}
+                  {state.periods[active].map((s, i) => (
+                    <tr key={s.id} className="border-t">
+                      <td className="p-2 text-gray-500">{i + 1}</td>
+                      <td className="p-2">
+                        <input
+                          value={s.name}
+                          onChange={(e) => updateStudent(active, i, { name: e.target.value })}
+                          className="w-full border px-2 py-1"
+                        />
+                      </td>
+                      <td className="p-2">
+                        <button
+                          onClick={() => removeStudent(active, i)}
+                          className="px-2 py-1 border"
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Quick Paste (unchanged) */}
+            <div className="mt-4 bg-white rounded-2xl border p-3">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-medium">Quick Paste Roster</h3>
+                <button
+                  onClick={() => applyPaste(active)}
+                  className="px-3 py-1.5 rounded-xl bg-black text-white"
+                >
+                  Apply
+                </button>
+              </div>
+              <textarea
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                rows={6}
+                className="w-full border px-2 py-2 font-mono text-xs"
+              />
+            </div>
+          </section>
+        )}
 
         {/* RULES PANEL (collapsible, matches layout style) */}
         {rulesOpen && (
@@ -881,72 +961,6 @@ export default function App() {
             ))}
           </div>
         </div>
-
-        {/* ROSTER (simple students editor, URLs hidden as requested earlier) */}
-        <section className="bg-white rounded-2xl shadow border p-3">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-xl font-semibold">{state.titles[active]} — Students</h2>
-            <button onClick={() => addStudent(active)} className="px-3 py-1.5 rounded-xl border">
-              Add Student
-            </button>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-100">
-                <tr>
-                  <th className="p-2">#</th>
-                  <th className="p-2">Name</th>
-                  <th className="p-2">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {state.periods[active].length === 0 && (
-                  <tr>
-                    <td colSpan={3} className="p-4 text-gray-500">
-                      No students yet.
-                    </td>
-                  </tr>
-                )}
-                {state.periods[active].map((s, i) => (
-                  <tr key={s.id} className="border-t">
-                    <td className="p-2 text-gray-500">{i + 1}</td>
-                    <td className="p-2">
-                      <input
-                        value={s.name}
-                        onChange={(e) => updateStudent(active, i, { name: e.target.value })}
-                        className="w-full border px-2 py-1"
-                      />
-                    </td>
-                    <td className="p-2">
-                      <button onClick={() => removeStudent(active, i)} className="px-2 py-1 border">
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Quick Paste (unchanged) */}
-          <div className="mt-4 bg-white rounded-xl border p-3">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="font-medium">Quick Paste Roster</h3>
-              <button
-                onClick={() => applyPaste(active)}
-                className="px-3 py-1.5 rounded-xl bg-black text-white"
-              >
-                Apply
-              </button>
-            </div>
-            <textarea
-              value={pasteText}
-              onChange={(e) => setPasteText(e.target.value)}
-              rows={4}
-              className="w-full border px-2 py-2 font-mono text-xs"
-            />
-          </div>
-        </section>
       </main>
     </div>
   );
@@ -980,7 +994,6 @@ function clampInt(v: number, min: number, max: number) {
   return Math.min(max, Math.max(min, v));
 }
 
-/* ---------- Desk card ---------- */
 function DeskCard({
   student,
   onDragStart,
@@ -1013,7 +1026,7 @@ function DeskCard({
       onDragStart={onDragStart}
       onDragOver={onDragOver}
       onDrop={onDrop}
-      title={student?.name || ""}
+      title={student?.name || ""} // full name on hover
     >
       <div
         className="rounded-xl overflow-hidden bg-gray-100 flex items-center justify-center"
@@ -1030,6 +1043,7 @@ function DeskCard({
         )}
       </div>
 
+      {/* Name under the image */}
       <div className="mt-1 w-full px-1 text-center leading-tight text-xs break-words">
         {student?.name || "(empty)"}
       </div>
