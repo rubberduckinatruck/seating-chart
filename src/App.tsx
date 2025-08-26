@@ -66,6 +66,8 @@ interface AppState {
   rules: Record<PeriodKey, PeriodRules>;
   /** Persisted seat assignments (same device) */
   seats: Record<PeriodKey, (Student | null)[]>;
+  /** NEW: teacher-only seat tag constraints (per seat, per period) */
+  seatTags: Record<PeriodKey, (string[] | null)[]>;
 }
 
 /* ---------- Utility helpers ---------- */
@@ -84,7 +86,7 @@ function padToSeats(roster: Roster | (Student | null)[], seatCount = ROWS * COLS
   return out;
 }
 
-/* ---------- Photo manifests (lowercase-only + base-aware) ---------- */
+/* ---------- Photo Manifests (lowercase-only + base-aware) ---------- */
 function stemToDisplay(stem: string) {
   return stem.replace(/_/g, " ");
 }
@@ -100,7 +102,7 @@ async function loadPeriodFromManifest(period: "p1" | "p3" | "p4" | "p5" | "p6") 
   const manifestUrl = joinBase("photos", folder, "index.json");
 
   const res = await fetch(manifestUrl, { cache: "no-store" });
-  if (!res.ok) throw new Error(`${period} manifest not found`);
+  if (!res.ok) throw new Error(${period} manifest not found);
 
   const files: string[] = await res.json();
   const basePath = joinBase("photos", folder) + "/";
@@ -111,7 +113,7 @@ async function loadPeriodFromManifest(period: "p1" | "p3" | "p4" | "p5" | "p6") 
       id: stem,
       name: stemToDisplay(stem),
       photo: basePath + filename,
-      tags: [],
+      tags: [], // ensure new students have tags: []
     } as Student;
   });
 }
@@ -125,13 +127,21 @@ function indexToRowCol(idx: number) {
 function pairKeyForIndex(idx: number) {
   const { row, col } = indexToRowCol(idx);
   const pair = Math.floor(col / 2);
-  return `${row}-${pair}`;
+  return ${row}-${pair};
 }
 function findSeatIndexById(arr: (Student | null)[], id: string): number {
   return arr.findIndex((s) => s && s.id === id);
 }
-function countConflicts(arr: (Student | null)[], rules: PeriodRules): number {
+
+/** UPDATED: counts classic rule conflicts + seatTag mismatches (ANY-of match) */
+function countConflicts(
+  arr: (Student | null)[],
+  rules: PeriodRules,
+  seatTags?: (string[] | null)[]
+): number {
   let conflicts = 0;
+
+  // Classic apart/together rule checks
   for (const r of rules.apart) {
     if (!r.aId || !r.bId) continue;
     const ai = findSeatIndexById(arr, r.aId);
@@ -149,6 +159,29 @@ function countConflicts(arr: (Student | null)[], rules: PeriodRules): number {
     }
     if (pairKeyForIndex(ai) !== pairKeyForIndex(bi)) conflicts++;
   }
+
+  // NEW: seat tag mismatches (lenient ANY-of)
+  if (seatTags && seatTags.length === ROWS * COLS) {
+    for (let i = 0; i < seatTags.length; i++) {
+      const seatReq = seatTags[i];
+      if (!seatReq || seatReq.length === 0) continue; // no restriction
+      const occupant = arr[i];
+      if (!occupant) continue; // empty seat doesn't count as conflict
+      const studentTags = Array.isArray(occupant.tags) ? occupant.tags : [];
+      // normalize to lower case for comparison
+      const req = seatReq.map((t) => (t || "").trim().toLowerCase()).filter(Boolean);
+      const have = studentTags.map((t) => (t || "").trim().toLowerCase()).filter(Boolean);
+      let overlap = false;
+      for (const t of req) {
+        if (have.includes(t)) {
+          overlap = true;
+          break;
+        }
+      }
+      if (!overlap) conflicts++;
+    }
+  }
+
   return conflicts;
 }
 
@@ -170,6 +203,14 @@ const EMPTY_STATE: AppState = {
     p5: [],
     p6: [],
   },
+  // NEW: default seat tags (each period gets ROWS*COLS entries; [] = no restriction)
+  seatTags: {
+    p1: Array(ROWS * COLS).fill([]),
+    p3: Array(ROWS * COLS).fill([]),
+    p4: Array(ROWS * COLS).fill([]),
+    p5: Array(ROWS * COLS).fill([]),
+    p6: Array(ROWS * COLS).fill([]),
+  },
 };
 
 function ensureRulesShape(s: AppState | null): AppState {
@@ -179,12 +220,24 @@ function ensureRulesShape(s: AppState | null): AppState {
     titles: s.titles || EMPTY_STATE.titles,
     rules: s.rules || EMPTY_STATE.rules,
     seats: s.seats || EMPTY_STATE.seats,
+    seatTags: s.seatTags || EMPTY_STATE.seatTags,
   };
   for (const k of PERIOD_KEYS) {
     base.rules[k] ||= { apart: [], together: [] };
     base.rules[k].apart ||= [];
     base.rules[k].together ||= [];
     base.seats[k] ||= [];
+    // ensure seatTags shape & fill with [] where missing
+    const current = base.seatTags[k];
+    if (!Array.isArray(current) || current.length !== ROWS * COLS) {
+      const arr: (string[] | null)[] = Array(ROWS * COLS);
+      for (let i = 0; i < ROWS * COLS; i++) {
+        arr[i] = [];
+      }
+      base.seatTags[k] = arr;
+    } else {
+      base.seatTags[k] = current.map((v) => (v == null ? [] : v));
+    }
   }
   return base;
 }
@@ -270,7 +323,7 @@ export default function App() {
 
   /* ---------- Roster editing ---------- */
   function addStudent(period: PeriodKey) {
-    const id = `student_${Date.now()}`;
+    const id = student_${Date.now()};
     const newStudent: Student = { id, name: "First Last", photo: "", tags: [] };
     setState((s) => ({
       ...s,
@@ -286,11 +339,26 @@ export default function App() {
     });
   }
 
+  function normalizeTagsInput(raw: string): string[] {
+    return raw
+      .split(/[;|,]/)
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean);
+  }
+
   function updateStudent(period: PeriodKey, idx: number, patch: Partial<Student>) {
+    // Normalize tags if provided as a delimited string (from input)
+    const p2: Partial<Student> = { ...patch };
+    if (typeof (p2 as any).tags === "string") {
+      (p2 as any).tags = normalizeTagsInput((p2 as any).tags);
+    } else if (Array.isArray(p2.tags)) {
+      p2.tags = p2.tags.map((t) => (t || "").trim().toLowerCase()).filter(Boolean);
+    }
+
     // Update roster entry
     setState((s) => {
       const roster = s.periods[period].slice();
-      const updated = { ...roster[idx], ...patch };
+      const updated = { ...roster[idx], ...p2 };
       roster[idx] = updated;
       return { ...s, periods: { ...s.periods, [period]: roster } };
     });
@@ -299,7 +367,7 @@ export default function App() {
       const rosterId = state.periods[period][idx]?.id;
       if (!rosterId) return a;
       const arr = a[period].map((seat) =>
-        seat && seat.id === rosterId ? { ...seat, ...patch } : seat
+        seat && seat.id === rosterId ? { ...seat, ...p2 } : seat
       );
       return { ...a, [period]: arr };
     });
@@ -381,7 +449,7 @@ export default function App() {
     const dataUrl = await toPng(node as HTMLElement, { pixelRatio: 2 });
     const a = document.createElement("a");
     a.href = dataUrl;
-    a.download = `${state.titles[active].replace(/\s+/g, "_").toLowerCase()}_seating.png`;
+    a.download = ${state.titles[active].replace(/\s+/g, "_").toLowerCase()}_seating.png;
     a.click();
   }
 
@@ -441,11 +509,11 @@ export default function App() {
       const tags =
         tagStr.length > 0
           ? tagStr
-              .split(/[;|]/)
-              .map((t) => t.trim())
+              .split(/[;|,]/)
+              .map((t) => t.trim().toLowerCase())
               .filter(Boolean)
           : [];
-      const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "_") || `s_${i}`;
+      const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "_") || s_${i};
       return { id, name, photo, tags };
     });
     updatePeriod(period, roster);
@@ -535,7 +603,7 @@ export default function App() {
 
     for (let t = 0; t < 1500; t++) {
       const arr = padToSeats(shuffle(roster));
-      const conf = countConflicts(arr, rules);
+      const conf = countConflicts(arr, rules, state.seatTags[period]);
       if (conf === 0) {
         setAssignments((a) => ({ ...a, [period]: arr }));
         return;
@@ -547,13 +615,13 @@ export default function App() {
     }
     setAssignments((a) => ({ ...a, [period]: best }));
     if (bestConf > 0) {
-      alert(`${bestConf} rule conflict(s) could not be satisfied; showing closest arrangement.`);
+      alert(${bestConf} rule conflict(s) could not be satisfied; showing closest arrangement.);
     }
   }
 
   function checkConflicts(period: PeriodKey) {
-    const conflicts = countConflicts(assignments[period], rulesFor(period));
-    alert(conflicts === 0 ? "No rule conflicts in the current layout." : `${conflicts} conflict(s) detected.`);
+    const conflicts = countConflicts(assignments[period], rulesFor(period), state.seatTags[period]);
+    alert(conflicts === 0 ? "No rule/seat-tag conflicts in the current layout." : ${conflicts} conflict(s) detected.);
   }
 
   /* ---------- UI state ---------- */
@@ -561,6 +629,7 @@ export default function App() {
   const [layoutOpen, setLayoutOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [studentsOpen, setStudentsOpen] = useState(false);
+  const [seatTagsOpen, setSeatTagsOpen] = useState(false); // NEW: Seat Tags panel toggle
   useEffect(() => {
     try {
       localStorage.setItem(LAYOUT_LS_KEY, JSON.stringify(layout));
@@ -571,23 +640,39 @@ export default function App() {
     setLayout(DEFAULT_LAYOUT);
   }
 
-  const seatCol = `${layout.cardWidth}px`;
+  const seatCol = ${layout.cardWidth}px;
   const gridTemplateColumns = [
     seatCol,
     seatCol,
-    `${layout.pairGap}px`,
+    ${layout.pairGap}px,
     seatCol,
     seatCol,
-    `${layout.pairGap}px`,
+    ${layout.pairGap}px,
     seatCol,
     seatCol,
   ].join(" ");
+
+  // Helpers for editing seat tags
+  function seatTagStringAt(period: PeriodKey, idx: number): string {
+    const val = state.seatTags[period][idx];
+    if (!val || val.length === 0) return "";
+    return val.join("; ");
+  }
+  function updateSeatTagAt(period: PeriodKey, idx: number, raw: string) {
+    const arr = (state.seatTags[period] || []).slice();
+    const parsed = normalizeTagsInput(raw);
+    arr[idx] = parsed.length === 0 ? [] : parsed;
+    setState((s) => ({
+      ...s,
+      seatTags: { ...s.seatTags, [period]: arr },
+    }));
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
       {/* PRINT CSS: print only the chartCapture, single page */}
       <style>
-        {`
+        {
         @media print {
           @page { size: letter landscape; margin: 0.5in; }
           body * { visibility: hidden !important; }
@@ -600,7 +685,7 @@ export default function App() {
           }
           html, body { background: #ffffff !important; }
         }
-      `}
+      }
       </style>
 
       {/* Header: single-line title + period tabs + load photos button */}
@@ -674,6 +759,14 @@ export default function App() {
             >
               Rules
             </button>
+            {/* NEW: Toggle Seat Tags panel (teacher-only; outside chartCapture) */}
+            <button
+              onClick={() => setSeatTagsOpen((v) => !v)}
+              className={"px-3 py-1.5 rounded-xl border " + (seatTagsOpen ? "bg-black text-white" : "bg-white")}
+              title="Seat Tags (teacher-only constraints)"
+            >
+              Seat Tags
+            </button>
             {/* Toggle Layout panel */}
             <button
               onClick={() => setLayoutOpen((v) => !v)}
@@ -700,13 +793,15 @@ export default function App() {
                   <tr>
                     <th className="p-2">#</th>
                     <th className="p-2">Name</th>
+                    {/* NEW: Tags column */}
+                    <th className="p-2">Tags (;-separated)</th>
                     <th className="p-2">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {state.periods[active].length === 0 && (
                     <tr>
-                      <td colSpan={3} className="p-4 text-gray-500">
+                      <td colSpan={4} className="p-4 text-gray-500">
                         No students yet.
                       </td>
                     </tr>
@@ -719,6 +814,15 @@ export default function App() {
                           value={s.name}
                           onChange={(e) => updateStudent(active, i, { name: e.target.value })}
                           className="w-full border px-2 py-1"
+                        />
+                      </td>
+                      {/* NEW: Editable tags field (hidden from chart/print; teacher-only UI here) */}
+                      <td className="p-2">
+                        <input
+                          value={(s.tags || []).join("; ")}
+                          onChange={(e) => updateStudent(active, i, { tags: e.target.value })}
+                          className="w-full border px-2 py-1"
+                          placeholder="iep; 504; el"
                         />
                       </td>
                       <td className="p-2">
@@ -771,7 +875,7 @@ export default function App() {
                 </p>
                 <div className="space-y-2">
                   {rulesFor(active).apart.map((r, i) => (
-                    <div key={`apart-${i}`} className="flex flex-wrap items-center gap-2">
+                    <div key={apart-${i}} className="flex flex-wrap items-center gap-2">
                       <select
                         className="border rounded-lg px-2 py-1 flex-1 min-w-[200px]"
                         value={r.aId}
@@ -819,7 +923,7 @@ export default function App() {
                 </p>
                 <div className="space-y-2">
                   {rulesFor(active).together.map((r, i) => (
-                    <div key={`together-${i}`} className="flex flex-wrap items-center gap-2">
+                    <div key={together-${i}} className="flex flex-wrap items-center gap-2">
                       <select
                         className="border rounded-lg px-2 py-1 flex-1 min-w-[200px]"
                         value={r.aId}
@@ -873,6 +977,62 @@ export default function App() {
                   Check Conflicts
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* NEW: SEAT TAGS PANEL (teacher-only, not inside #chartCapture) */}
+        {seatTagsOpen && (
+          <div className="mb-2 bg-white rounded-2xl shadow border p-3 no-print">
+            <h3 className="font-semibold mb-2">Seat Tags — {state.titles[active]}</h3>
+            <p className="text-sm text-gray-600 mb-3">
+              Enter <span className="font-mono">;-separated</span> tags per seat. Empty = no restriction. A student matches if they have <em>any</em> of the seat’s tags.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-100">
+                  <tr>
+                    <th className="p-2 text-left">Seat #</th>
+                    <th className="p-2 text-left">Row,Pair</th>
+                    <th className="p-2 text-left">Tags (;-separated)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from({ length: ROWS * COLS }).map((_, i) => {
+                    const rc = indexToRowCol(i);
+                    const pair = Math.floor(rc.col / 2);
+                    return (
+                      <tr key={i} className="border-t">
+                        <td className="p-2">{i + 1}</td>
+                        <td className="p-2">{rc.row + 1}, {pair + 1}</td>
+                        <td className="p-2">
+                          <input
+                            className="w-full border px-2 py-1"
+                            value={seatTagStringAt(active, i)}
+                            onChange={(e) => updateSeatTagAt(active, i, e.target.value)}
+                            placeholder="iep; 504; el"
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                className="px-3 py-1.5 rounded-xl border"
+                onClick={() => alert("Seat tags saved.")}
+              >
+                Save Seat Tags
+              </button>
+              <button
+                className="px-3 py-1.5 rounded-xl border"
+                onClick={() => checkConflicts(active)}
+              >
+                Check Conflicts
+              </button>
             </div>
           </div>
         )}
@@ -948,15 +1108,15 @@ export default function App() {
             className="grid"
             style={{
               gridTemplateColumns, // 2 seats + spacer + 2 seats + spacer + 2 seats
-              columnGap: `${layout.withinPairGap}px`,
-              rowGap: `${layout.rowGap}px`,
+              columnGap: ${layout.withinPairGap}px,
+              rowGap: ${layout.rowGap}px,
               justifyContent: "center" as const,
             }}
           >
             {Array.from({ length: ROWS }).map((_, r) => (
               <React.Fragment key={r}>
                 {Array.from({ length: 8 }).map((__, vcol) => {
-                  if (vcol === 2 || vcol === 5) return <div key={`s-${r}-${vcol}`} />;
+                  if (vcol === 2 || vcol === 5) return <div key={s-${r}-${vcol}} />;
                   let logicalCol = vcol;
                   if (vcol >= 6) logicalCol -= 2;
                   else if (vcol >= 3) logicalCol -= 1;
@@ -964,7 +1124,7 @@ export default function App() {
                   const seat = assignments[active][seatIndex] || null;
                   return (
                     <DeskCard
-                      key={`d-${r}-${vcol}`}
+                      key={d-${r}-${vcol}}
                       student={seat}
                       onDragStart={() => handleDragStart(seatIndex)}
                       onDragOver={handleDragOver}
@@ -1034,9 +1194,9 @@ function DeskCard({
     <div
       className="rounded-2xl border shadow-sm bg-white flex flex-col items-center justify-start"
       style={{
-        width: `${layout.cardWidth}px`,
-        minHeight: `${layout.cardMinHeight}px`,
-        padding: `${layout.cardPadding}px`,
+        width: ${layout.cardWidth}px,
+        minHeight: ${layout.cardMinHeight}px,
+        padding: ${layout.cardPadding}px,
       }}
       draggable={!!student}
       onDragStart={onDragStart}
@@ -1047,9 +1207,9 @@ function DeskCard({
       <div
         className="rounded-xl overflow-hidden bg-gray-100 flex items-center justify-center"
         style={{
-          width: `${layout.photoWidth}px`,
-          height: `${layout.photoHeight}px`,
-          marginTop: `${layout.photoTopMargin}px`,
+          width: ${layout.photoWidth}px,
+          height: ${layout.photoHeight}px,
+          marginTop: ${layout.photoTopMargin}px,
         }}
       >
         {student?.photo ? (
