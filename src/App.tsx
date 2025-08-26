@@ -29,6 +29,7 @@ type Student = {
   id: string;
   name: string;
   photo: string;
+  tags: string[];
 };
 
 type Roster = Student[];
@@ -76,8 +77,9 @@ function shuffle<T>(arr: T[]): T[] {
   }
   return a;
 }
-function padToSeats(roster: Roster, seatCount = ROWS * COLS): (Student | null)[] {
-  const out: (Student | null)[] = roster.slice(0, seatCount);
+function padToSeats(roster: Roster | (Student | null)[], seatCount = ROWS * COLS): (Student | null)[] {
+  const base = roster.slice(0, seatCount) as (Student | null)[];
+  const out: (Student | null)[] = base;
   while (out.length < seatCount) out.push(null);
   return out;
 }
@@ -109,6 +111,7 @@ async function loadPeriodFromManifest(period: "p1" | "p3" | "p4" | "p5" | "p6") 
       id: stem,
       name: stemToDisplay(stem),
       photo: basePath + filename,
+      tags: [],
     } as Student;
   });
 }
@@ -268,7 +271,7 @@ export default function App() {
   /* ---------- Roster editing ---------- */
   function addStudent(period: PeriodKey) {
     const id = `student_${Date.now()}`;
-    const newStudent: Student = { id, name: "First Last", photo: "" };
+    const newStudent: Student = { id, name: "First Last", photo: "", tags: [] };
     setState((s) => ({
       ...s,
       periods: { ...s.periods, [period]: [...s.periods[period], newStudent] },
@@ -431,9 +434,19 @@ export default function App() {
       .map((l) => l.trim())
       .filter(Boolean);
     const roster: Roster = rows.map((line, i) => {
-      const [name, photo = ""] = line.split(/,\s*/);
+      const parts = line.split(/,\s*/);
+      const name = parts[0] ?? "";
+      const photo = parts[1] ?? "";
+      const tagStr = parts[2] ?? "";
+      const tags =
+        tagStr.length > 0
+          ? tagStr
+              .split(/[;|]/)
+              .map((t) => t.trim())
+              .filter(Boolean)
+          : [];
       const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "_") || `s_${i}`;
-      return { id, name, photo };
+      return { id, name, photo, tags };
     });
     updatePeriod(period, roster);
     setPasteText("");
@@ -722,7 +735,7 @@ export default function App() {
               </table>
             </div>
 
-            {/* Quick Paste (unchanged) */}
+            {/* Quick Paste (unchanged except paste handler now supports optional tags) */}
             <div className="mt-4 bg-white rounded-2xl border p-3">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="font-medium">Quick Paste Roster</h3>
@@ -739,6 +752,9 @@ export default function App() {
                 rows={6}
                 className="w-full border px-2 py-2 font-mono text-xs"
               />
+              <div className="text-xs text-gray-500 mt-1">
+                Format per line: <code>Name, photoURL, tag1;tag2</code> (tags optional)
+              </div>
             </div>
           </section>
         )}
