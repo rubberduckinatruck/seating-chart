@@ -569,6 +569,8 @@ export default function App() {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [studentsOpen, setStudentsOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
+  const [tagDrafts, setTagDrafts] = useState<Record<string, string>>({});
+
 
   useEffect(() => {
     try {
@@ -806,16 +808,30 @@ export default function App() {
                           className="w-full border px-2 py-1"
                         />
                       </td>
-                      <td className="p-2">
-                        <input
-                          value={(s.tags || []).join("; ")}
-                          onChange={(e) =>
-                            updateStudent(active, i, { tags: e.target.value })
-                          }
-                          className="w-full border px-2 py-1"
-                          placeholder="iep; 504; el"
-                        />
-                      </td>
+                     <input
+  value={tagDrafts[s.id] ?? (s.tags || []).join("; ")}
+  onChange={(e) => setTagDrafts((d) => ({ ...d, [s.id]: e.target.value }))}
+  onBlur={(e) => {
+    updateStudent(active, i, { tags: e.target.value }); // parses ; , |
+    setTagDrafts((d) => {
+      const { [s.id]: _remove, ...rest } = d;
+      return rest;
+    });
+  }}
+  onKeyDown={(e) => {
+    if (e.key === "Enter") {
+      const val = (e.target as HTMLInputElement).value;
+      updateStudent(active, i, { tags: val });
+      setTagDrafts((d) => {
+        const { [s.id]: _remove, ...rest } = d;
+        return rest;
+      });
+    }
+  }}
+  className="w-full border px-2 py-1"
+  placeholder="iep; 504; el"
+/>
+
                       <td className="p-2">
                         <button
                           onClick={() => removeStudent(active, i)}
