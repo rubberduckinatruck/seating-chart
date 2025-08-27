@@ -568,6 +568,8 @@ export default function App() {
   const [layoutOpen, setLayoutOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [studentsOpen, setStudentsOpen] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+
   useEffect(() => {
     try {
       localStorage.setItem(LAYOUT_LS_KEY, JSON.stringify(layout));
