@@ -1,8 +1,8 @@
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
 
-// IMPORTANT: set base to your repo name
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
 export default defineConfig({
   plugins: [react()],
-  base: "/seating-chart/"
-});
+  base: '/seating-chart/'
+})
