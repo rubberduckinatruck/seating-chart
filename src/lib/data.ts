@@ -10,9 +10,10 @@ async function fetchManifest(period: PeriodId): Promise<StudentMeta[]> {
   const data = await res.json()
   return (data as any[]).map((e) => ({
     id: String(e.id),
-    name: String(e.name ?? (String(e.id || '').replaceAll('_',' ').replace(/\.png$/i,''))),
+    name: String(e.name ?? (String(e.id || '').replaceAll('_',' ').replace(/\.(png|jpg|jpeg|webp)$/i,''))),
     displayName: e.displayName ? String(e.displayName) : undefined,
-    tags: Array.isArray(e.tags) ? e.tags.filter((t: any) => typeof t === 'string') : undefined,
+    // period in file is informational; roster is keyed by current period
+    tags: Array.isArray(e.tags) ? e.tags.filter((t: any) => typeof t === 'string' && (t === 'front row' || t === 'back row' || t === 'near TB')) : undefined,
     notes: e.notes ? String(e.notes) : undefined,
   }))
 }
