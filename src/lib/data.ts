@@ -3,15 +3,26 @@ import { PERIODS, type PeriodId } from './constants'
 import type { StudentsConfig, StudentMeta } from './types'
 import { storage } from './storage'
 
+// Join BASE_URL + path without using new URL on a relative base
 function withBase(p: string) {
   const base = (import.meta.env && import.meta.env.BASE_URL) || '/'
-  return new URL(p.replace(/^\//, ''), base).toString()
+  return (
+    (base.endsWith('/') ? base : base + '/') +
+    p.replace(/^\/+/, '')
+  )
+  // If you prefer absolute URLs, use:
+  // return new URL(
+  //   p.replace(/^\/+/, ''),
+  //   window.location.origin + (base.startsWith('/') ? base : '/' + base)
+  // ).toString()
 }
 
 async function fetchManifest(period: PeriodId): Promise<StudentMeta[]> {
   const url = withBase(`photos/${period}/index.json`)
   const res = await fetch(url, { cache: 'no-store' })
-  if (!res.ok) throw new Error(`Failed to load manifest for ${period} (HTTP ${res.status})`)
+  if (!res.ok) {
+    throw new Error(`Failed to load manifest for ${period} (HTTP ${res.status})`)
+  }
   const data = await res.json()
   return (data as any[]).map((e) => ({
     id: String(e.id),
@@ -60,7 +71,8 @@ export async function syncStudentsFromManifests(): Promise<StudentsConfig> {
       }
 
       merged[period] = out
-    } catch {
+    } catch (e: any) {
+      console.warn(`sync: failed to fetch ${period}:`, e?.message || e)
       // If fetch fails, keep existing local data for this period
       merged[period] = local[period]
     }
