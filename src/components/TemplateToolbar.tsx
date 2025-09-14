@@ -5,9 +5,9 @@ const PRESET_KEYS = ['template-default', 'testing', 'groups'] as const
 type PresetKey = typeof PRESET_KEYS[number]
 
 const PRESET_LABELS: Record<PresetKey, string> = {
-  'template-default': 'Default Layout',
-  'testing': 'Testing (Rows/Spacing)',
-  'groups': 'Groups (Pods)',
+  'template-default': 'Default Paired Columns',
+  'testing': 'Testing',
+  'groups': 'Groups of 4',
 }
 
 const LS_PREFIX = 'seating.presets.'
