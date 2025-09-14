@@ -124,13 +124,30 @@ export default function TemplateToolbar({
   }
 
   function addFixture(kind: FixtureType) {
-    const base = String(kind).replace(/\s+/g, '-')
-    const id = pickUniqueId(base)
-    // Spawn near top-left with a slight offset
-    const offset = cfg.fixtures.length * 8
-    const fx = { id, type: kind, x: 12 + offset, y: 48 + offset } as TemplateConfig['fixtures'][number]
-    onChange({ ...cfg, fixtures: [...cfg.fixtures, fx] })
+  const base = String(kind).replace(/\s+/g, '-')
+  const id = pickUniqueId(base)
+  const offset = cfg.fixtures.length * 8
+
+  const sizeByType: Record<string, { w: number; h: number }> = {
+    'teacher-desk': { w: 140, h: 90 },
+    'door': { w: 40, h: 10 },
+    'window': { w: 80, h: 10 },
+    'whiteboard': { w: 220, h: 24 },
   }
+  const sz = sizeByType[String(kind)] ?? { w: 120, h: 60 }
+
+  const fx = {
+    id,
+    type: kind,
+    x: 12 + offset,
+    y: 48 + offset,
+    w: sz.w,
+    h: sz.h,
+  } as TemplateConfig['fixtures'][number]
+
+  onChange({ ...cfg, fixtures: [...cfg.fixtures, fx] })
+}
+
 
   return (
     <div className="flex flex-wrap items-center gap-3">
