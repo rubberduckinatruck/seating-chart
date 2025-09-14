@@ -6,7 +6,7 @@ on:
     paths:
       - "public/photos/**"
       - "!public/photos/**/index.json"  # don't trigger on the bot's manifest-only commits
-      - "scripts/build-manifests.mjs"
+      - "scripts/enrich-manifests.mjs"
   workflow_dispatch:
 
 permissions:
@@ -27,7 +27,7 @@ jobs:
           node-version: "20"
 
       - name: Generate manifests
-        run: node scripts/build-manifests.mjs
+        run: node scripts/enrich-manifests.mjs
 
       - name: Commit manifests (if changed)
         run: |
