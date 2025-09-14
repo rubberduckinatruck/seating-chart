@@ -1,4 +1,3 @@
-// src/tabs/StudentsTab.tsx
 import { useEffect, useMemo, useState } from 'react'
 import { PERIODS, type PeriodId } from '../lib/constants'
 import type { StudentsConfig, StudentMeta } from '../lib/types'
@@ -13,7 +12,12 @@ export default function StudentsTab() {
   const [cfg, setCfg] = useState<StudentsConfig>(() => storage.getStudents())
   const [filter, setFilter] = useState('')
 
-  // Keep in sync if another part of the app updates students
+  // collapsed by default for all periods
+  const [collapsed, setCollapsed] = useState<Record<PeriodId, boolean>>({
+    p1: true, p3: true, p4: true, p5: true, p6: true,
+  })
+
+  // listen for external updates (e.g., sync from manifests)
   useEffect(() => {
     const onUpdate = () => setCfg(storage.getStudents())
     window.addEventListener('students:updated', onUpdate)
@@ -31,7 +35,8 @@ export default function StudentsTab() {
     const idx = list.findIndex((s) => s.id === id)
     if (idx === -1) return
     const curr = list[idx]
-    // If displayName is the same as name, don't store it (keeps data tidy)
+
+    // normalize displayName: if equal to file name, drop override
     let displayName = patch.displayName
     if (displayName !== undefined && displayName.trim() === curr.name.trim()) {
       displayName = undefined
@@ -50,6 +55,10 @@ export default function StudentsTab() {
     s.name.toLowerCase().includes(filterLc) ||
     s.id.toLowerCase().includes(filterLc)
 
+  function setAll(collapsedAll: boolean) {
+    setCollapsed({ p1: collapsedAll, p3: collapsedAll, p4: collapsedAll, p5: collapsedAll, p6: collapsedAll })
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
@@ -60,7 +69,22 @@ export default function StudentsTab() {
         >
           Sync from manifests
         </button>
-        <div className="ml-auto">
+
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            className="px-2 py-1 text-xs rounded-md border border-slate-300 bg-white hover:bg-slate-50"
+            onClick={() => setAll(false)}
+            title="Expand all periods"
+          >
+            Expand all
+          </button>
+          <button
+            className="px-2 py-1 text-xs rounded-md border border-slate-300 bg-white hover:bg-slate-50"
+            onClick={() => setAll(true)}
+            title="Collapse all periods"
+          >
+            Collapse all
+          </button>
           <input
             className="w-64 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
             placeholder="Search by name..."
@@ -72,30 +96,46 @@ export default function StudentsTab() {
 
       {periods.map((p) => {
         const list = cfg[p].slice().sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b))).filter(matches)
+        const isCollapsed = collapsed[p]
         return (
           <div key={p} className="rounded-lg border border-slate-200 bg-white">
-            <div className="px-3 py-2 border-b border-slate-200 text-sm font-medium">
-              {p.toUpperCase()} — {cfg[p].length} students
+            <div className="px-3 py-2 border-b border-slate-200 text-sm font-medium flex items-center">
+              <button
+                className="mr-2 text-slate-600 hover:text-slate-900"
+                onClick={() => setCollapsed(prev => ({ ...prev, [p]: !prev[p] }))}
+                title={isCollapsed ? 'Expand' : 'Collapse'}
+              >
+                {isCollapsed ? '▶' : '▼'}
+              </button>
+              <span className="mr-2">{p.toUpperCase()} — {cfg[p].length} students</span>
+              <button
+                className="ml-auto text-xs text-slate-600 hover:text-slate-900"
+                onClick={() => setCollapsed(prev => ({ ...prev, [p]: !prev[p] }))}
+              >
+                {isCollapsed ? 'Expand' : 'Collapse'}
+              </button>
             </div>
 
-            <div className="p-3 space-y-1">
-              {/* Header row */}
-              <div className="grid grid-cols-12 gap-2 px-2 text-xs text-slate-500">
-                <div className="col-span-3">Display Name</div>
-                <div className="col-span-3">File Name</div>
-                <div className="col-span-3">Tags</div>
-                <div className="col-span-3">Notes</div>
+            {!isCollapsed && (
+              <div className="p-3 space-y-1">
+                {/* Header row */}
+                <div className="grid grid-cols-12 gap-2 px-2 text-xs text-slate-500">
+                  <div className="col-span-3">Display Name</div>
+                  <div className="col-span-3">File Name</div>
+                  <div className="col-span-3">Tags</div>
+                  <div className="col-span-3">Notes</div>
+                </div>
+
+                {list.map((s) => (
+                  <Row
+                    key={s.id}
+                    period={p}
+                    student={s}
+                    onChange={(patch) => updateStudent(p, s.id, patch)}
+                  />
+                ))}
               </div>
-
-              {list.map((s) => (
-                <Row
-                  key={s.id}
-                  period={p}
-                  student={s}
-                  onChange={(patch) => updateStudent(p, s.id, patch)}
-                />
-              ))}
-            </div>
+            )}
           </div>
         )
       })}
@@ -131,7 +171,6 @@ function Row({
           placeholder={student.name}
           onChange={(e) => onChange({ displayName: e.target.value })}
           onBlur={(e) => {
-            // If user cleared back to file name, drop the override
             const v = e.target.value.trim()
             onChange({ displayName: v === student.name.trim() ? undefined : v })
           }}
@@ -149,7 +188,7 @@ function Row({
         />
       </div>
 
-      {/* Tags (compact toggle pills) */}
+      {/* Tags (toggle chips) */}
       <div className="col-span-3">
         <div className="flex flex-wrap gap-1">
           {ALLOWED_TAGS.map((tag) => {
@@ -174,7 +213,7 @@ function Row({
         </div>
       </div>
 
-      {/* Notes (single-row textarea) */}
+      {/* Notes (single-row) */}
       <div className="col-span-3">
         <textarea
           className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm resize-none h-9"
