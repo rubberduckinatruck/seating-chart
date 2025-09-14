@@ -4,7 +4,7 @@ import { snap } from '../lib/drag'
 
 type Props = {
   id: string
-  type: string
+  type: string // 'window' | 'door' | 'teacher-desk' | etc.
   x: number
   y: number
   w?: number
@@ -15,101 +15,224 @@ type Props = {
 }
 
 const TYPE_LABEL: Record<string, string> = {
-  'teacher-desk': 'Teacher Desk',
-  'door': 'Door',
   'window': 'Window',
-  'whiteboard': 'Whiteboard',
+  'door': 'Door',
+  'teacher-desk': "TB's Desk",
+  "tb's desk": "TB's Desk",
+  'tb-desk': "TB's Desk",
 }
 
 const TYPE_DEFAULT_SIZE: Record<string, { w: number; h: number }> = {
+  'window': { w: 80, h: 12 },
+  'door': { w: 40, h: 12 },
   'teacher-desk': { w: 140, h: 90 },
-  'door': { w: 40, h: 10 },
-  'window': { w: 80, h: 10 },
-  'whiteboard': { w: 220, h: 24 },
 }
 
+const TYPE_STYLE: Record<string, { bg: string; border: string; text: string }> = {
+  'window': { bg: 'bg-blue-100', border: 'border-blue-300', text: 'text-blue-900/80' },
+  'door': { bg: 'bg-amber-100', border: 'border-amber-300', text: 'text-amber-900/80' },
+  'teacher-desk': { bg: 'bg-emerald-100', border: 'border-emerald-300', text: 'text-emerald-900/80' },
+}
+
+const MIN_W = 28
+const MIN_H = 20
+
+type Dir = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
+
 export default function Fixture(props: Props) {
-  const { id, type, x, y, onMove, onResize, onRemove } = props
+  const { id, type } = props
   const defaults = TYPE_DEFAULT_SIZE[type] || { w: 120, h: 60 }
-  const w = Math.max(20, props.w ?? defaults.w)
-  const h = Math.max(10, props.h ?? defaults.h)
+  const w = Math.max(MIN_W, props.w ?? defaults.w)
+  const h = Math.max(MIN_H, props.h ?? defaults.h)
+  const x = props.x
+  const y = props.y
 
-  const [drag, setDrag] = useState<{ ox: number; oy: number; sx: number; sy: number } | null>(null)
-  const [resz, setResz] = useState<{ ox: number; oy: number; sw: number; sh: number } | null>(null)
-
-  function onMouseDown(e: React.MouseEvent) {
-    // ignore clicks on controls/resize handle
-    if ((e.target as HTMLElement).closest('[data-fixture-controls]')) return
-    if ((e.target as HTMLElement).closest('[data-resize]')) return
-    setDrag({ ox: e.clientX, oy: e.clientY, sx: x, sy: y })
-    window.addEventListener('mousemove', onMouseMove as any)
-    window.addEventListener('mouseup', onMouseUp as any, { once: true })
-  }
-  function onMouseMove(e: MouseEvent) {
-    if (!drag) return
-    const nx = snap(drag.sx + (e.clientX - drag.ox))
-    const ny = snap(drag.sy + (e.clientY - drag.oy))
-    onMove(nx, ny)
-  }
-  function onMouseUp() {
-    setDrag(null)
-    window.removeEventListener('mousemove', onMouseMove as any)
-  }
-
-  // resize (bottom-right corner)
-  function onResizeDown(e: React.MouseEvent) {
-    e.stopPropagation()
-    setResz({ ox: e.clientX, oy: e.clientY, sw: w, sh: h })
-    window.addEventListener('mousemove', onResizeMove as any)
-    window.addEventListener('mouseup', onResizeUp as any, { once: true })
-  }
-  function onResizeMove(e: MouseEvent) {
-    if (!resz) return
-    const dw = e.clientX - resz.ox
-    const dh = e.clientY - resz.oy
-    const nw = Math.max(24, snap(resz.sw + dw))
-    const nh = Math.max(16, snap(resz.sh + dh))
-    onResize?.(nw, nh)
-  }
-  function onResizeUp() {
-    setResz(null)
-    window.removeEventListener('mousemove', onResizeMove as any)
-  }
-
+  const style = TYPE_STYLE[type] || { bg: 'bg-slate-100', border: 'border-slate-300', text: 'text-slate-900/80' }
   const label = TYPE_LABEL[type] ?? (type?.toString?.() || 'Fixture')
+
+  // drag
+  const dragRef = useRef<{ px: number; py: number; sx: number; sy: number } | null>(null)
+  // resize
+  const resRef = useRef<{ px: number; py: number; sx: number; sy: number; sw: number; sh: number; dir: Dir } | null>(null)
+  // rAF batching to avoid jank
+  const rafMove = useRef<number | null>(null)
+  const rafResize = useRef<number | null>(null)
+
+  function onContainerPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    // ignore if pressed on a handle or controls
+    if ((e.target as HTMLElement).closest('[data-fixture-handle]')) return
+    if ((e.target as HTMLElement).closest('[data-fixture-controls]')) return
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    dragRef.current = { px: e.clientX, py: e.clientY, sx: x, sy: y }
+  }
+
+  function onContainerPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!dragRef.current) return
+    const { px, py, sx, sy } = dragRef.current
+    const nx = snap(sx + (e.clientX - px))
+    const ny = snap(sy + (e.clientY - py))
+    if (rafMove.current) cancelAnimationFrame(rafMove.current)
+    rafMove.current = requestAnimationFrame(() => props.onMove(nx, ny))
+  }
+
+  function onContainerPointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    if (dragRef.current) {
+      dragRef.current = null
+      if (rafMove.current) {
+        cancelAnimationFrame(rafMove.current)
+        rafMove.current = null
+      }
+    }
+    ;(e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId)
+  }
+
+  function onHandlePointerDown(e: React.PointerEvent<HTMLDivElement>, dir: Dir) {
+    e.stopPropagation()
+    ;(e.currentTarget.parentElement as HTMLElement)?.setPointerCapture(e.pointerId)
+    resRef.current = { px: e.clientX, py: e.clientY, sx: x, sy: y, sw: w, sh: h, dir }
+  }
+
+  function onHandlePointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!resRef.current) return
+    const { px, py, sx, sy, sw, sh, dir } = resRef.current
+    let nx = sx
+    let ny = sy
+    let nw = sw
+    let nh = sh
+    const dx = e.clientX - px
+    const dy = e.clientY - py
+
+    // horizontal edges
+    if (dir.includes('e')) nw = sw + dx
+    if (dir.includes('w')) { nw = sw - dx; nx = sx + dx }
+    // vertical edges
+    if (dir.includes('s')) nh = sh + dy
+    if (dir.includes('n')) { nh = sh - dy; ny = sy + dy }
+
+    // enforce minimums, adjust pos for W/N clamps
+    if (nw < MIN_W) { nx = sx + (sw - MIN_W); nw = MIN_W }
+    if (nh < MIN_H) { ny = sy + (sh - MIN_H); nh = MIN_H }
+
+    // snap all
+    nx = snap(nx)
+    ny = snap(ny)
+    nw = Math.max(MIN_W, snap(nw))
+    nh = Math.max(MIN_H, snap(nh))
+
+    if (rafMove.current) cancelAnimationFrame(rafMove.current)
+    if (rafResize.current) cancelAnimationFrame(rafResize.current)
+
+    // position & size can change during a single resize gesture
+    rafMove.current = requestAnimationFrame(() => props.onMove(nx, ny))
+    rafResize.current = requestAnimationFrame(() => props.onResize?.(nw, nh))
+  }
+
+  function onHandlePointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    if (resRef.current) {
+      resRef.current = null
+      if (rafMove.current) { cancelAnimationFrame(rafMove.current); rafMove.current = null }
+      if (rafResize.current) { cancelAnimationFrame(rafResize.current); rafResize.current = null }
+    }
+    ;(e.currentTarget.parentElement as HTMLElement)?.releasePointerCapture?.(e.pointerId)
+  }
+
+  // shared classes for handles
+  const handleBase =
+    'absolute w-2.5 h-2.5 bg-slate-700/70 rounded-sm ring-2 ring-white shadow pointer-events-auto'
+  const handle = (pos: string, cursor: string) =>
+    `${handleBase} ${pos} ${cursor}`
 
   return (
     <div
       className={[
-        'absolute rounded-md border border-slate-400/70 bg-white/80 shadow-sm',
-        (drag || resz) ? 'ring-2 ring-blue-500/60' : ''
+        'absolute select-none cursor-move rounded-md border shadow-sm',
+        style.bg, style.border,
+        // subtle focus ring while active
+        (dragRef.current || resRef.current) ? 'ring-2 ring-blue-500/50' : ''
       ].join(' ')}
       style={{ left: x, top: y, width: w, height: h }}
-      onMouseDown={onMouseDown}
-      title={`${label} (${id}) • drag to move, grab corner to resize`}
+      onPointerDown={onContainerPointerDown}
+      onPointerMove={onContainerPointerMove}
+      onPointerUp={onContainerPointerUp}
+      title={`${label} (${id}) — drag to move, resize from any edge/corner`}
     >
-      {/* header / controls */}
+      {/* Remove button (top-right) */}
       <div
         data-fixture-controls
-        className="flex items-center justify-between text-[11px] leading-none px-2 py-1 bg-slate-800 text-white rounded-t-md select-none"
-        onMouseDown={(e) => e.stopPropagation()}
+        className="absolute right-0 top-0 p-1"
+        onPointerDown={(e) => e.stopPropagation()}
       >
-        <span className="truncate">{label}</span>
         <button
-          className="ml-2 opacity-80 hover:opacity-100"
-          onClick={(e) => { e.stopPropagation(); onRemove() }}
+          className="px-1 rounded text-[10px] opacity-70 hover:opacity-100 bg-white/70"
+          onClick={(e) => { e.stopPropagation(); props.onRemove() }}
           title="Remove fixture"
         >
           ✕
         </button>
       </div>
 
-      {/* resize handle */}
+      {/* Centered label */}
+      <div className={`absolute inset-0 flex items-center justify-center ${style.text} text-[12px] font-medium`}>
+        {label}
+      </div>
+
+      {/* 8 resize handles */}
       <div
-        data-resize
-        className="absolute right-0 bottom-0 w-3 h-3 bg-slate-700 cursor-nwse-resize rounded-tr-[2px]"
-        onMouseDown={onResizeDown}
-        title="Resize"
+        data-fixture-handle
+        className={handle('left-1/2 -translate-x-1/2 top-0', 'cursor-n-resize')}
+        onPointerDown={(e) => onHandlePointerDown(e, 'n')}
+        onPointerMove={onHandlePointerMove}
+        onPointerUp={onHandlePointerUp}
+      />
+      <div
+        data-fixture-handle
+        className={handle('left-1/2 -translate-x-1/2 bottom-0', 'cursor-s-resize')}
+        onPointerDown={(e) => onHandlePointerDown(e, 's')}
+        onPointerMove={onHandlePointerMove}
+        onPointerUp={onHandlePointerUp}
+      />
+      <div
+        data-fixture-handle
+        className={handle('top-1/2 -translate-y-1/2 right-0', 'cursor-e-resize')}
+        onPointerDown={(e) => onHandlePointerDown(e, 'e')}
+        onPointerMove={onHandlePointerMove}
+        onPointerUp={onHandlePointerUp}
+      />
+      <div
+        data-fixture-handle
+        className={handle('top-1/2 -translate-y-1/2 left-0', 'cursor-w-resize')}
+        onPointerDown={(e) => onHandlePointerDown(e, 'w')}
+        onPointerMove={onHandlePointerMove}
+        onPointerUp={onHandlePointerUp}
+      />
+
+      <div
+        data-fixture-handle
+        className={handle('left-0 top-0', 'cursor-nw-resize')}
+        onPointerDown={(e) => onHandlePointerDown(e, 'nw')}
+        onPointerMove={onHandlePointerMove}
+        onPointerUp={onHandlePointerUp}
+      />
+      <div
+        data-fixture-handle
+        className={handle('right-0 top-0', 'cursor-ne-resize')}
+        onPointerDown={(e) => onHandlePointerDown(e, 'ne')}
+        onPointerMove={onHandlePointerMove}
+        onPointerUp={onHandlePointerUp}
+      />
+      <div
+        data-fixture-handle
+        className={handle('right-0 bottom-0', 'cursor-se-resize')}
+        onPointerDown={(e) => onHandlePointerDown(e, 'se')}
+        onPointerMove={onHandlePointerMove}
+        onPointerUp={onHandlePointerUp}
+      />
+      <div
+        data-fixture-handle
+        className={handle('left-0 bottom-0', 'cursor-sw-resize')}
+        onPointerDown={(e) => onHandlePointerDown(e, 'sw')}
+        onPointerMove={onHandlePointerMove}
+        onPointerUp={onHandlePointerUp}
       />
     </div>
   )
