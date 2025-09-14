@@ -1,128 +1,103 @@
-
+// src/components/PeriodSeat.tsx
 import React from 'react'
-import type { StudentTag } from '../lib/types'
-import LazyImage from './LazyImage'
+import { withBase } from '../lib/withBase'
 
-export default function PeriodSeat({
-  periodId,
-  seatId,
-  x,
-  y,
-  w,
-  h,
-  tags,
-  isExcluded,
-  isSelected,
-  studentId,
-  studentName,
-  onClick,
-  onToggleExclude,
-  onUnassign,
-  onDropStudent,
-  onDragStudentStart,
-}: {
+type Props = {
   periodId: string
   seatId: string
   x: number
   y: number
   w: number
   h: number
-  tags: StudentTag[]
+  tags?: string[]
   isExcluded: boolean
   isSelected: boolean
   studentId: string | null
   studentName: string | null
-  onClick: () => void
-  onToggleExclude: () => void
-  onUnassign: () => void
+  onClick: () => void              // existing: select/swap
+  onToggleExclude: () => void      // existing: toggle exclude
+  onUnassign?: () => void          // kept for compatibility, not rendered
   onDropStudent: (studentId: string) => void
-  onDragStudentStart: (studentId: string) => void
-}) {
-  const base =
-    'absolute rounded-lg border p-2 text-xs transition-colors ' +
-    (isExcluded ? 'bg-slate-200 border-slate-300 text-slate-500' : 'bg-white border-slate-300')
+  onDragStudentStart: () => void
+}
 
-  const selected = isSelected ? ' ring-2 ring-blue-500' : ''
+export default function PeriodSeat(props: Props) {
+  const {
+    periodId, seatId, x, y, w, h, tags = [],
+    isExcluded, isSelected, studentId, studentName,
+    onClick, onToggleExclude, onDropStudent,
+  } = props
 
-  function onDragOver(e: React.DragEvent) {
+  const isBackRow = Array.isArray(tags) && tags.includes('back row')
+
+  // Clicking behavior:
+  // - Back row: click toggles exclude (per your request)
+  // - Other rows: click keeps existing select/swap behavior
+  function handleClick() {
+    if (isBackRow) onToggleExclude()
+    else onClick()
+  }
+
+  // Drop a student onto this seat
+  function handleDragOver(e: React.DragEvent) {
     e.preventDefault()
   }
-
-  function onDrop(e: React.DragEvent) {
-    const id = e.dataTransfer.getData('text/plain')
-    if (id) onDropStudent(id)
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault()
+    const sid = e.dataTransfer.getData('text/student-id') || e.dataTransfer.getData('text/plain')
+    if (sid) onDropStudent(sid)
   }
 
-  const photoUrl = studentId ? `/photos/${periodId}/${studentId}` : null
+  // Build image URL for the student photo when assigned
+  const imgSrc = studentId ? withBase(`photos/${periodId}/${studentId}`) : null
 
   return (
     <div
-      className={base + selected}
-      style={{ left: x, top: y, width: w, height: h }}
-      onClick={onClick}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
+      data-seat={seatId}
+      onClick={handleClick}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+      className={[
+        'absolute rounded-lg border shadow-sm bg-white cursor-pointer select-none transition',
+        isSelected ? 'ring-2 ring-blue-500' : 'hover:shadow',
+        isExcluded ? 'opacity-40 grayscale' : '',
+      ].join(' ')}
+      style={{ left: x, top: y, width: w, height: h, padding: 8 }}
+      title={isBackRow ? 'Click to exclude/include (back row)' : 'Click to select'}
     >
-      <div className="flex items-center justify-between text-[11px] text-slate-600">
-        <span>{seatId}</span>
-        {isExcluded && (
-          <span className="ml-2 inline-flex items-center gap-1 text-[10px] text-slate-600">
-            <span className="inline-block w-3 h-3 rounded-full bg-slate-400"></span> excluded
-          </span>
-        )}
-      </div>
-
-      <div className="mt-1 flex items-center gap-2">
-        {photoUrl ? (
-          <LazyImage
-            src={photoUrl}
-            alt={studentName || ''}
-            className="w-[48px] h-[58px] object-cover rounded border border-slate-200"
-            width={48}
-            height={58}
-          />
-        ) : (
-          <div className="w-[48px] h-[58px] rounded border border-dashed border-slate-300 flex items-center justify-center text-[10px] text-slate-400">no photo</div>
-        )}
-
-        <div className="min-w-0">
-          <div
-            className="text-sm font-medium truncate"
-            draggable={!!studentId}
-            onDragStart={(e) => {
-              if (!studentId) return
-              e.dataTransfer.setData('text/plain', studentId)
-              onDragStudentStart(studentId)
-            }}
-            title={studentName || ''}
-          >
-            {studentName || '(empty)'}
+      {/* Seat content */}
+      {studentId ? (
+        <div className="h-full w-full flex flex-col items-center justify-start">
+          {/* Photo */}
+          <div className="w-full flex-1 overflow-hidden rounded-md border bg-slate-50">
+            {/* If an image fails, the border+bg shows instead of a broken icon */}
+            <img
+              src={imgSrc!}
+              alt={studentName ?? studentId}
+              className="block w-full h-full object-cover"
+              onError={(e) => {
+                // hide broken icon; show empty framed box instead
+                (e.currentTarget as HTMLImageElement).style.display = 'none'
+              }}
+              draggable={false}
+            />
           </div>
-
-          <div className="mt-1 flex flex-wrap gap-1">
-            {(tags ?? []).map(t => (
-              <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-700">{t}</span>
-            ))}
+          {/* Name under the photo */}
+          <div className="mt-1 text-sm text-center truncate w-full" title={studentName ?? studentId}>
+            {studentName ?? studentId}
           </div>
         </div>
-      </div>
+      ) : (
+        // Empty seat placeholder
+        <div className="h-full w-full flex items-center justify-center text-xs text-slate-500">
+          Empty
+        </div>
+      )}
 
-      <div className="mt-2 flex gap-2">
-        <button
-          className="px-2 py-1 text-[11px] rounded border border-slate-300 bg-white hover:bg-slate-50"
-          onClick={(e) => { e.stopPropagation(); onToggleExclude() }}
-        >
-          {isExcluded ? 'Include seat' : 'Exclude seat'}
-        </button>
-        {studentId && (
-          <button
-            className="px-2 py-1 text-[11px] rounded border border-slate-300 bg-white hover:bg-slate-50"
-            onClick={(e) => { e.stopPropagation(); onUnassign() }}
-          >
-            Unassign
-          </button>
-        )}
-      </div>
+      {/* NOTE: No Unassign or Exclude buttons rendered.
+         - Exclude toggles by click on BACK ROW seats.
+         - Selection/swap via click on other rows (unchanged behavior).
+      */}
     </div>
   )
 }
