@@ -1,4 +1,3 @@
-
 import { useEffect, useMemo, useState } from 'react'
 import { storage } from '../lib/storage'
 import type { TemplateConfig, StudentTag } from '../lib/types'
@@ -6,6 +5,7 @@ import Seat from '../components/Seat'
 import Fixture from '../components/Fixture'
 import TemplateToolbar from '../components/TemplateToolbar'
 import { intersects, type Rect } from '../lib/drag'
+import TagPalette from '../components/TagPalette'
 
 export default function TemplateTab() {
   const [cfg, setCfg] = useState<TemplateConfig>(() => storage.getTemplate())
@@ -67,31 +67,19 @@ export default function TemplateTab() {
       <h2 className="text-lg font-semibold">Template (Global Layout)</h2>
       <TemplateToolbar cfg={cfg} onChange={setCfg} />
 
-      <div className="flex items-end gap-4">
-        <div>
-          <label className="block text-xs text-slate-500 mb-1">Within-pair gap (px)</label>
-          <input type="number" value={cfg.spacing.withinPair} onChange={(e) => updateSpacing({ withinPair: Number(e.target.value) })} className="w-32 rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
-        </div>
-        <div>
-          <label className="block text-xs text-slate-500 mb-1">Between-pairs gap (px)</label>
-          <input type="number" value={cfg.spacing.betweenPairs} onChange={(e) => updateSpacing({ betweenPairs: Number(e.target.value) })} className="w-32 rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
-        </div>
-        <div>
-          <label className="block text-xs text-slate-500 mb-1">Row gap (px)</label>
-          <input type="number" value={cfg.spacing.rowGap} onChange={(e) => updateSpacing({ rowGap: Number(e.target.value) })} className="w-32 rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
-        </div>
-        <div>
-          <label className="block text-xs text-slate-500 mb-1">Card width (px)</label>
-          <input type="number" value={cfg.spacing.cardW} onChange={(e) => updateSpacing({ cardW: Number(e.target.value) })} className="w-32 rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
-        </div>
-        <div>
-          <label className="block text-xs text-slate-500 mb-1">Card min-height (px)</label>
-          <input type="number" value={cfg.spacing.cardH} onChange={(e) => updateSpacing({ cardH: Number(e.target.value) })} className="w-36 rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
-        </div>
-        <button className="ml-2 px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" onClick={applyGrid}>Apply grid</button>
+      {/* Tag palette for drag-and-drop tagging */}
+      <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
+        <div className="font-medium mb-2">Seat Tags</div>
+        <TagPalette />
       </div>
 
-      <div className="relative border border-slate-200 rounded-lg bg-slate-50 overflow-hidden" style={{ width: Math.max(900, 3 * (2 * cardW + cfg.spacing.withinPair + cfg.spacing.betweenPairs)), height: 6 * (cfg.spacing.cardH + cfg.spacing.rowGap) + 100 }}>
+      <div
+        className="relative border border-slate-200 rounded-lg bg-slate-50 overflow-hidden"
+        style={{
+          width: Math.max(900, 3 * (2 * cardW + cfg.spacing.withinPair + cfg.spacing.betweenPairs)),
+          height: 6 * (cfg.spacing.cardH + cfg.spacing.rowGap) + 100
+        }}
+      >
         {/* Board indicator */}
         <div className="absolute left-0 right-0 top-2 text-center text-xs text-slate-500">Front of classroom</div>
 
