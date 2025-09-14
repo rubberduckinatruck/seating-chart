@@ -18,13 +18,19 @@ export default function TemplateTab() {
   const cardW = cfg.spacing.cardW
   const cardH = cfg.spacing.cardH
 
+  // ---- Desks ----
   function moveDesk(id: string, nx: number, ny: number) {
     // prevent overlap with other desks (simple AABB test)
     const meIdx = cfg.desks.findIndex(d => d.id === id)
     const myRect: Rect = { x: nx, y: ny, w: cardW, h: cardH }
-    const collide = cfg.desks.some((d, i) => i !== meIdx && intersects(myRect, { x: d.x, y: d.y, w: cardW, h: cardH }))
+    const collide = cfg.desks.some((d, i) =>
+      i !== meIdx && intersects(myRect, { x: d.x, y: d.y, w: cardW, h: cardH })
+    )
     if (collide) return
-    setCfg(prev => ({ ...prev, desks: prev.desks.map(d => d.id === id ? { ...d, x: nx, y: ny } : d) }))
+    setCfg(prev => ({
+      ...prev,
+      desks: prev.desks.map(d => (d.id === id ? { ...d, x: nx, y: ny } : d)),
+    }))
   }
 
   function toggleDeskTag(id: string, tag: StudentTag) {
@@ -34,23 +40,30 @@ export default function TemplateTab() {
         if (d.id !== id) return d
         const has = d.tags.includes(tag)
         return { ...d, tags: has ? d.tags.filter(t => t !== tag) : [...d.tags, tag] }
-      })
+      }),
     }))
   }
 
+  // ---- Fixtures ----
   function moveFixture(id: string, nx: number, ny: number) {
-    setCfg(prev => ({ ...prev, fixtures: prev.fixtures.map(f => f.id === id ? { ...f, x: nx, y: ny } : f) }))
+    setCfg(prev => ({
+      ...prev,
+      fixtures: prev.fixtures.map(f => (f.id === id ? { ...f, x: nx, y: ny } : f)),
+    }))
   }
 
-  // NEW: persist width/height when resizing a fixture
   function resizeFixture(id: string, nw: number, nh: number) {
-    setCfg(prev => ({ ...prev, fixtures: prev.fixtures.map(f => f.id === id ? { ...f, w: nw, h: nh } : f) }))
+    setCfg(prev => ({
+      ...prev,
+      fixtures: prev.fixtures.map(f => (f.id === id ? { ...f, w: nw, h: nh } : f)),
+    }))
   }
 
   function removeFixture(id: string) {
     setCfg(prev => ({ ...prev, fixtures: prev.fixtures.filter(f => f.id !== id) }))
   }
 
+  // ---- Spacing / grid ----
   function updateSpacing(partial: Partial<TemplateConfig['spacing']>) {
     setCfg(prev => ({ ...prev, spacing: { ...prev.spacing, ...partial } }))
   }
@@ -74,11 +87,66 @@ export default function TemplateTab() {
       <h2 className="text-lg font-semibold">Template (Global Layout)</h2>
       <TemplateToolbar cfg={cfg} onChange={setCfg} />
 
+      {/* Spacing controls (so you can see seat size) */}
+      <div className="flex flex-wrap items-end gap-4">
+        <div>
+          <label className="block text-xs text-slate-500 mb-1">Within-pair gap (px)</label>
+          <input
+            type="number"
+            value={cfg.spacing.withinPair}
+            onChange={(e) => updateSpacing({ withinPair: Number(e.target.value) })}
+            className="w-32 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-500 mb-1">Between-pairs gap (px)</label>
+          <input
+            type="number"
+            value={cfg.spacing.betweenPairs}
+            onChange={(e) => updateSpacing({ betweenPairs: Number(e.target.value) })}
+            className="w-32 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-500 mb-1">Row gap (px)</label>
+          <input
+            type="number"
+            value={cfg.spacing.rowGap}
+            onChange={(e) => updateSpacing({ rowGap: Number(e.target.value) })}
+            className="w-32 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-500 mb-1">Card width (px)</label>
+          <input
+            type="number"
+            value={cfg.spacing.cardW}
+            onChange={(e) => updateSpacing({ cardW: Number(e.target.value) })}
+            className="w-32 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-500 mb-1">Card height (px)</label>
+          <input
+            type="number"
+            value={cfg.spacing.cardH}
+            onChange={(e) => updateSpacing({ cardH: Number(e.target.value) })}
+            className="w-36 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+          />
+        </div>
+        <button
+          className="ml-2 px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50"
+          onClick={applyGrid}
+        >
+          Apply grid
+        </button>
+      </div>
+
       <div
         className="relative border border-slate-200 rounded-lg bg-slate-50 overflow-hidden"
         style={{
           width: Math.max(900, 3 * (2 * cardW + cfg.spacing.withinPair + cfg.spacing.betweenPairs)),
-          height: 6 * (cfg.spacing.cardH + cfg.spacing.rowGap) + 100
+          height: 6 * (cfg.spacing.cardH + cfg.spacing.rowGap) + 100,
         }}
       >
         {/* Board indicator (doesn't block drags) */}
@@ -86,6 +154,7 @@ export default function TemplateTab() {
           Front of classroom
         </div>
 
+        {/* Desks */}
         {cfg.desks.map(d => (
           <Seat
             key={d.id}
@@ -100,6 +169,7 @@ export default function TemplateTab() {
           />
         ))}
 
+        {/* Fixtures */}
         {cfg.fixtures.map(f => (
           <Fixture
             key={f.id}
