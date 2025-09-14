@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+// src/tabs/TemplateTab.tsx
+import { useEffect, useState } from 'react'
 import { storage } from '../lib/storage'
 import type { TemplateConfig, StudentTag } from '../lib/types'
 import Seat from '../components/Seat'
@@ -9,6 +10,7 @@ import { intersects, type Rect } from '../lib/drag'
 export default function TemplateTab() {
   const [cfg, setCfg] = useState<TemplateConfig>(() => storage.getTemplate())
 
+  // persist template changes
   useEffect(() => {
     storage.setTemplate(cfg)
   }, [cfg])
@@ -39,6 +41,12 @@ export default function TemplateTab() {
   function moveFixture(id: string, nx: number, ny: number) {
     setCfg(prev => ({ ...prev, fixtures: prev.fixtures.map(f => f.id === id ? { ...f, x: nx, y: ny } : f) }))
   }
+
+  // NEW: persist width/height when resizing a fixture
+  function resizeFixture(id: string, nw: number, nh: number) {
+    setCfg(prev => ({ ...prev, fixtures: prev.fixtures.map(f => f.id === id ? { ...f, w: nw, h: nh } : f) }))
+  }
+
   function removeFixture(id: string) {
     setCfg(prev => ({ ...prev, fixtures: prev.fixtures.filter(f => f.id !== id) }))
   }
@@ -66,8 +74,6 @@ export default function TemplateTab() {
       <h2 className="text-lg font-semibold">Template (Global Layout)</h2>
       <TemplateToolbar cfg={cfg} onChange={setCfg} />
 
-
-
       <div
         className="relative border border-slate-200 rounded-lg bg-slate-50 overflow-hidden"
         style={{
@@ -75,8 +81,10 @@ export default function TemplateTab() {
           height: 6 * (cfg.spacing.cardH + cfg.spacing.rowGap) + 100
         }}
       >
-        {/* Board indicator */}
-        <div className="absolute left-0 right-0 top-2 text-center text-xs text-slate-500 pointer-events-none">Front of classroom</div>
+        {/* Board indicator (doesn't block drags) */}
+        <div className="absolute left-0 right-0 top-2 text-center text-xs text-slate-500 pointer-events-none">
+          Front of classroom
+        </div>
 
         {cfg.desks.map(d => (
           <Seat
@@ -99,7 +107,10 @@ export default function TemplateTab() {
             type={f.type}
             x={f.x}
             y={f.y}
+            w={f.w}
+            h={f.h}
             onMove={(nx, ny) => moveFixture(f.id, nx, ny)}
+            onResize={(nw, nh) => resizeFixture(f.id, nw, nh)}
             onRemove={() => removeFixture(f.id)}
           />
         ))}
