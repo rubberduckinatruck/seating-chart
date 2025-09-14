@@ -10,7 +10,8 @@ export interface TemplateDesk {
   tags: StudentTag[]
 }
 
-export type FixtureType = 'door' | 'window' | 'board' | 'projector'
+// Fixture types per user: TB's desk, door, window
+export type FixtureType = 'tb' | 'door' | 'window'
 
 export interface TemplateFixture {
   id: string
@@ -22,7 +23,7 @@ export interface TemplateFixture {
 export interface TemplateConfig {
   desks: TemplateDesk[]
   fixtures: TemplateFixture[]
-  spacing: { rowGap: number; colGap: number }
+  spacing: { rowGap: number; colGap: number; withinPair: number; betweenPairs: number; cardW: number; cardH: number }
 }
 
 export interface StudentMeta {

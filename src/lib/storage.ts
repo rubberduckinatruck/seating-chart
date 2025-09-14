@@ -27,7 +27,6 @@ function write<T>(key: string, value: T) {
 export function ensureSchemaInitialized() {
   const version = Number(localStorage.getItem(KEY_SCHEMA) || '0')
   if (version !== CURRENT_SCHEMA) {
-    // Reset: clear old keys to avoid edge-case conflicts
     localStorage.removeItem(KEY_TEMPLATE)
     localStorage.removeItem(KEY_STUDENTS)
     localStorage.removeItem(KEY_ASSIGN)
@@ -35,14 +34,12 @@ export function ensureSchemaInitialized() {
     localStorage.removeItem(KEY_EXCLUDE)
     localStorage.setItem(KEY_SCHEMA, String(CURRENT_SCHEMA))
 
-    // Initialize with sane defaults
     write(KEY_TEMPLATE, defaultTemplate())
     write(KEY_STUDENTS, defaultStudents())
     write(KEY_ASSIGN, defaultAssignments())
     write(KEY_RULES, defaultRules())
     write(KEY_EXCLUDE, defaultExcluded())
   } else {
-    // Ensure each slice exists
     if (!safeRead<TemplateConfig>(KEY_TEMPLATE)) write(KEY_TEMPLATE, defaultTemplate())
     if (!safeRead<StudentsConfig>(KEY_STUDENTS)) write(KEY_STUDENTS, defaultStudents())
     if (!safeRead<PeriodAssignments>(KEY_ASSIGN)) write(KEY_ASSIGN, defaultAssignments())
@@ -51,20 +48,34 @@ export function ensureSchemaInitialized() {
   }
 }
 
-// Defaults
+// Defaults using provided measurements
+// Within-pair gap: 8, Between-pairs gap: 22, Row gap: 14,
+// Card width: 120, Card min-height: 156
 function defaultTemplate(): TemplateConfig {
-  // 6x6 grid baseline mapped to 36 seats (d1..d36) spaced by 120px
-  const desks = Array.from({ length: 36 }, (_, i) => {
-    const r = Math.floor(i / 6)
-    const c = i % 6
-    return { id: `d${i + 1}`, x: c * 120, y: r * 120, tags: [] }
-  })
+  const within = 8
+  const between = 22
+  const rowGap = 14
+  const cardW = 120
+  const cardH = 156
+  // Derived column gap between pair groups (2 cards + within gap + between gap)
+  // We'll store colGap as between for clarity, but compute positions directly
+  const desks = []
+  // 6 columns (3 pairs per row) × 6 rows = 36 desks
+  for (let r = 0; r < 6; r++) {
+    for (let c = 0; c < 6; c++) {
+      const pairIndex = Math.floor(c / 2) // 0..2
+      const inPair = c % 2 // 0 or 1
+      const x = pairIndex * (2 * cardW + within + between) + inPair * (cardW + within)
+      const y = r * (cardH + rowGap)
+      desks.push({ id: `d${r * 6 + c + 1}`, x, y, tags: [] })
+    }
+  }
   return {
     desks,
     fixtures: [
-      { id: 'f1', type: 'board', x: 0, y: -80 }
+      { id: 'fx1', type: 'tb', x: 0, y: -cardH / 2 } // TB's desk near top
     ],
-    spacing: { rowGap: 120, colGap: 120 }
+    spacing: { rowGap, colGap: between, withinPair: within, betweenPairs: between, cardW, cardH }
   }
 }
 
@@ -98,7 +109,6 @@ function defaultExcluded(): ExcludedSeats {
   return { p1: [], p3: [], p4: [], p5: [], p6: [] }
 }
 
-// Public getters/setters
 export const storage = {
   getTemplate(): TemplateConfig { return safeRead<TemplateConfig>(KEY_TEMPLATE) ?? defaultTemplate() },
   setTemplate(v: TemplateConfig) { write(KEY_TEMPLATE, v) },
