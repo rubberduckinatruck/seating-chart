@@ -1,81 +1,167 @@
+import { useEffect, useRef, useState } from 'react'
+import type { TemplateConfig } from '../lib/types'
 
-import type { TemplateConfig, TemplateFixture } from '../lib/types'
-import { useRef } from 'react'
+const PRESET_KEYS = ['template-default', 'testing', 'groups'] as const
+type PresetKey = typeof PRESET_KEYS[number]
 
-export default function TemplateToolbar({ cfg, onChange }: { cfg: TemplateConfig; onChange: (next: TemplateConfig) => void }) {
-  const importRef = useRef<HTMLInputElement | null>(null)
+const PRESET_LABELS: Record<PresetKey, string> = {
+  'template-default': 'Paired Columns',  // ← change the second string to rename what the dropdown shows on the webapp only.
+  'testing': 'Testing',
+  'groups': 'Groups of 4',
+}
 
-  function resetLayout() {
-    const { cardW, cardH, withinPair, betweenPairs, rowGap } = cfg.spacing
-    const desks = []
-    for (let r = 0; r < 6; r++) {
-      for (let c = 0; c < 6; c++) {
-        const pairIndex = Math.floor(c / 2)
-        const inPair = c % 2
-        const x = pairIndex * (2 * cardW + withinPair + betweenPairs) + inPair * (cardW + withinPair)
-        const y = r * (cardH + rowGap)
-        desks.push({ id: `d${r * 6 + c + 1}`, x, y, tags: [] })
-      }
+const LS_PREFIX = 'seating.presets.'
+
+function lsGetPreset(key: PresetKey): TemplateConfig | null {
+  try {
+    const raw = localStorage.getItem(LS_PREFIX + key)
+    if (!raw) return null
+    const json = JSON.parse(raw)
+    return isValidTemplate(json) ? (json as TemplateConfig) : null
+  } catch {
+    return null
+  }
+}
+
+function lsSetPreset(key: PresetKey, cfg: TemplateConfig) {
+  localStorage.setItem(LS_PREFIX + key, JSON.stringify(cfg))
+}
+
+function isValidTemplate(x: any): x is TemplateConfig {
+  return (
+    x &&
+    Array.isArray(x.desks) &&
+    typeof x.spacing === 'object' &&
+    typeof x.spacing.cardW === 'number' &&
+    typeof x.spacing.cardH === 'number'
+  )
+}
+
+export default function TemplateToolbar({
+  cfg,
+  onChange,
+}: {
+  cfg: TemplateConfig
+  onChange: (next: TemplateConfig) => void
+}) {
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [preset, setPreset] = useState<PresetKey>('template-default')
+
+  // Seed default preset once if missing
+  useEffect(() => {
+    if (!lsGetPreset('template-default')) {
+      lsSetPreset('template-default', cfg)
     }
-    onChange({ ...cfg, desks })
-  }
-
-  function clearDeskTags() {
-    onChange({ ...cfg, desks: cfg.desks.map(d => ({ ...d, tags: [] })) })
-  }
-
-  function addFixture(type: 'tb' | 'door' | 'window') {
-    const id = 'fx' + (1 + cfg.fixtures.length)
-    onChange({ ...cfg, fixtures: [...cfg.fixtures, { id, type, x: 0, y: 0 }] })
-  }
-
-  function clearFixtures() {
-    onChange({ ...cfg, fixtures: [] })
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   async function onImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
     try {
       const text = await file.text()
-      const parsed = JSON.parse(text)
-      if (parsed && typeof parsed === 'object' && Array.isArray(parsed.desks) && Array.isArray(parsed.fixtures) && parsed.spacing) {
-        onChange(parsed as TemplateConfig)
-      } else {
-        alert('Invalid template JSON')
-      }
-    } catch {
-      alert('Failed to import template JSON')
+      const json = JSON.parse(text)
+      if (!isValidTemplate(json)) throw new Error('Invalid template JSON')
+      onChange(json as TemplateConfig)
+    } catch (err) {
+      alert(`Import failed: ${(err as Error).message}`)
     } finally {
-      if (importRef.current) importRef.current.value = ''
+      e.target.value = ''
     }
   }
 
-  function exportTemplate() {
+  function onExport() {
     const blob = new Blob([JSON.stringify(cfg, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = 'template-config.json'
+    a.download = 'template.json'
     a.click()
     URL.revokeObjectURL(url)
   }
 
+  function loadPreset() {
+    const saved = lsGetPreset(preset)
+    if (!saved) {
+      alert(`No data saved for preset "${PRESET_LABELS[preset]}". Use Save to store the current layout.`)
+      return
+    }
+    onChange(saved)
+  }
+
+  function savePreset() {
+    const ok =
+      preset === 'template-default'
+        ? confirm('Overwrite "Default Layout" with the current layout?')
+        : true
+    if (!ok) return
+    lsSetPreset(preset, cfg)
+    console.log(`Saved preset "${PRESET_LABELS[preset]}".`)
+  }
+
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <button className="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" onClick={resetLayout}>Reset layout</button>
-      <button className="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" onClick={clearDeskTags}>Clear desk tags</button>
-      <div className="inline-flex rounded-md overflow-hidden border border-slate-300">
-        <button className="px-3 py-1.5 text-sm bg-white hover:bg-slate-50" onClick={() => addFixture('tb')}>Add TB's desk</button>
-        <button className="px-3 py-1.5 text-sm bg-white hover:bg-slate-50 border-l border-slate-300" onClick={() => addFixture('door')}>Add door</button>
-        <button className="px-3 py-1.5 text-sm bg-white hover:bg-slate-50 border-l border-slate-300" onClick={() => addFixture('window')}>Add window</button>
+      {/* Presets */}
+      <div className="flex items-center gap-2">
+        <label className="text-sm text-slate-600">Presets:</label>
+        <select
+          value={preset}
+          onChange={(e) => setPreset(e.target.value as PresetKey)}
+          className="text-sm rounded-md border border-slate-300 bg-white px-2 py-1"
+          title="Choose a preset slot"
+        >
+          {PRESET_KEYS.map((k) => (
+            <option key={k} value={k}>
+              {PRESET_LABELS[k]}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className="px-2 py-1 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50"
+          onClick={loadPreset}
+          title="Load the selected preset"
+        >
+          Load
+        </button>
+        <button
+          type="button"
+          className="px-2 py-1 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50"
+          onClick={savePreset}
+          title="Save/Update selected preset with current layout"
+        >
+          Save
+        </button>
       </div>
-      <button className="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" onClick={clearFixtures}>Clear fixtures</button>
 
-      <div className="ml-auto flex items-center gap-2">
-        <input type="file" accept="application/json" ref={importRef} onChange={onImport} className="text-sm" />
-        <button className="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" onClick={exportTemplate}>Export Template JSON</button>
-      </div>
+      {/* Divider */}
+      <div className="mx-2 h-5 w-px bg-slate-200" />
+
+      {/* Import / Export */}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="application/json"
+        className="hidden"
+        onChange={onImport}
+      />
+      <button
+        type="button"
+        className="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50"
+        onClick={() => fileRef.current?.click()}
+        title="Import a template JSON file"
+      >
+        Import Template JSON
+      </button>
+
+      <button
+        type="button"
+        className="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50"
+        onClick={onExport}
+        title="Download the current template as JSON"
+      >
+        Export Template JSON
+      </button>
     </div>
   )
 }
