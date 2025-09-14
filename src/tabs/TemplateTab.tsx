@@ -5,7 +5,6 @@ import Seat from '../components/Seat'
 import Fixture from '../components/Fixture'
 import TemplateToolbar from '../components/TemplateToolbar'
 import { intersects, type Rect } from '../lib/drag'
-import TagPalette from '../components/TagPalette'
 
 export default function TemplateTab() {
   const [cfg, setCfg] = useState<TemplateConfig>(() => storage.getTemplate())
@@ -67,11 +66,7 @@ export default function TemplateTab() {
       <h2 className="text-lg font-semibold">Template (Global Layout)</h2>
       <TemplateToolbar cfg={cfg} onChange={setCfg} />
 
-      {/* Tag palette for drag-and-drop tagging */}
-      <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
-        <div className="font-medium mb-2">Seat Tags</div>
-        <TagPalette />
-      </div>
+
 
       <div
         className="relative border border-slate-200 rounded-lg bg-slate-50 overflow-hidden"
