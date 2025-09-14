@@ -21,9 +21,9 @@ const TYPE_LABEL: Record<string, string> = {
 }
 
 const TYPE_DEFAULT_SIZE: Record<string, { w: number; h: number }> = {
-  'window': { w: 80, h: 12 },
-  'door': { w: 40, h: 12 },
-  'tb-desk': { w: 140, h: 90 },
+  'window': { w: 10, h: 40 },
+  'door': { w: 10, h: 40 },
+  'tb-desk': { w: 90, h: 120 },
 }
 
 const TYPE_STYLE: Record<string, { bg: string; border: string; text: string }> = {
