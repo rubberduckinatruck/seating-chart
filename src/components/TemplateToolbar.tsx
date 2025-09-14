@@ -128,9 +128,9 @@ export default function TemplateToolbar({
   const offset = cfg.fixtures.length * 8
 
   const sizeByType: Record<string, { w: number; h: number }> = {
-    'tb-desk': { w: 140, h: 90 },
-    'door': { w: 40, h: 10 },
-    'window': { w: 80, h: 10 },
+    'tb-desk': { w: 80, h: 120 },
+    'door': { w: 40, h: 80 },
+    'window': { w: 40, h: 80 },
   }
   const sz = sizeByType[String(kind)] ?? { w: 120, h: 60 }
 
