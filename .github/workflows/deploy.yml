@@ -25,13 +25,22 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          # remove cache: 'npm' so it doesn't require a lockfile
 
       - name: Install deps
         run: npm i --no-audit --no-fund
 
+      # NEW: generate manifests so they're included in the build output
+      - name: Generate photo manifests
+        run: node scripts/enrich-manifests.mjs
+
       - name: Build
         run: npm run build
+
+      # Optional: sanity check manifests made it into dist
+      - name: List built manifests
+        run: |
+          ls -la dist/photos || true
+          ls -la dist/photos/*/index.json || true
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
