@@ -4,7 +4,7 @@ import { snap } from '../lib/drag'
 
 type Props = {
   id: string
-  type: string // 'window' | 'door' | 'teacher-desk' | etc.
+  type: string // 'window' | 'door' | 'tb-desk' | etc.
   x: number
   y: number
   w?: number
@@ -17,21 +17,19 @@ type Props = {
 const TYPE_LABEL: Record<string, string> = {
   'window': 'Window',
   'door': 'Door',
-  'teacher-desk': "TB's Desk",
-  "tb's desk": "TB's Desk",
   'tb-desk': "TB's Desk",
 }
 
 const TYPE_DEFAULT_SIZE: Record<string, { w: number; h: number }> = {
   'window': { w: 80, h: 12 },
   'door': { w: 40, h: 12 },
-  'teacher-desk': { w: 140, h: 90 },
+  'tb-desk': { w: 140, h: 90 },
 }
 
 const TYPE_STYLE: Record<string, { bg: string; border: string; text: string }> = {
   'window': { bg: 'bg-blue-100', border: 'border-blue-300', text: 'text-blue-900/80' },
   'door': { bg: 'bg-amber-100', border: 'border-amber-300', text: 'text-amber-900/80' },
-  'teacher-desk': { bg: 'bg-emerald-100', border: 'border-emerald-300', text: 'text-emerald-900/80' },
+  'tb-desk': { bg: 'bg-emerald-100', border: 'border-emerald-300', text: 'text-emerald-900/80' },
 }
 
 const MIN_W = 28
