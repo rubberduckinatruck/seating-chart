@@ -76,7 +76,7 @@ export default function TemplateTab() {
         }}
       >
         {/* Board indicator */}
-        <div className="absolute left-0 right-0 top-2 text-center text-xs text-slate-500">Front of classroom</div>
+        <div className="absolute left-0 right-0 top-2 text-center text-xs text-slate-500 pointer-events-none">Front of classroom</div>
 
         {cfg.desks.map(d => (
           <Seat
