@@ -5,9 +5,9 @@ const PRESET_KEYS = ['template-default', 'testing', 'groups'] as const
 type PresetKey = typeof PRESET_KEYS[number]
 
 const PRESET_LABELS: Record<PresetKey, string> = {
-  'template-default': 'Paired Columns',  // ← change the second string to rename what the dropdown shows on the webapp only.
-  'testing': 'Testing',
-  'groups': 'Groups of 4',
+  'template-default': 'Default Layout',
+  'testing': 'Testing (Rows/Spacing)',
+  'groups': 'Groups (Pods)',
 }
 
 const LS_PREFIX = 'seating.presets.'
@@ -33,7 +33,8 @@ function isValidTemplate(x: any): x is TemplateConfig {
     Array.isArray(x.desks) &&
     typeof x.spacing === 'object' &&
     typeof x.spacing.cardW === 'number' &&
-    typeof x.spacing.cardH === 'number'
+    typeof x.spacing.cardH === 'number' &&
+    Array.isArray(x.fixtures)
   )
 }
 
@@ -47,7 +48,17 @@ export default function TemplateToolbar({
   const fileRef = useRef<HTMLInputElement>(null)
   const [preset, setPreset] = useState<PresetKey>('template-default')
 
-  // Seed default preset once if missing
+  // Simple fixture types menu (edit as you like)
+  type FixtureType = TemplateConfig['fixtures'][number]['type']
+  const FIXTURE_TYPES: FixtureType[] = [
+    'teacher-desk',
+    'door',
+    'window',
+    'whiteboard',
+  ] as unknown as FixtureType[]
+  const [fixtureType, setFixtureType] = useState<FixtureType>(FIXTURE_TYPES[0])
+
+  // Seed the default preset once if missing
   useEffect(() => {
     if (!lsGetPreset('template-default')) {
       lsSetPreset('template-default', cfg)
@@ -55,6 +66,7 @@ export default function TemplateToolbar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // ----- Import / Export -----
   async function onImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -80,6 +92,7 @@ export default function TemplateToolbar({
     URL.revokeObjectURL(url)
   }
 
+  // ----- Presets -----
   function loadPreset() {
     const saved = lsGetPreset(preset)
     if (!saved) {
@@ -96,11 +109,31 @@ export default function TemplateToolbar({
         : true
     if (!ok) return
     lsSetPreset(preset, cfg)
-    console.log(`Saved preset "${PRESET_LABELS[preset]}".`)
+  }
+
+  // ----- Fixtures -----
+  function pickUniqueId(base: string) {
+    const used = new Set(cfg.fixtures.map(f => f.id))
+    let n = 1
+    let id = `${base}-${n}`
+    while (used.has(id)) {
+      n += 1
+      id = `${base}-${n}`
+    }
+    return id
+  }
+
+  function addFixture(kind: FixtureType) {
+    const base = String(kind).replace(/\s+/g, '-')
+    const id = pickUniqueId(base)
+    // Drop new fixtures near the top-left with a tiny offset
+    const offset = cfg.fixtures.length * 8
+    const fx = { id, type: kind, x: 12 + offset, y: 48 + offset } as TemplateConfig['fixtures'][number]
+    onChange({ ...cfg, fixtures: [...cfg.fixtures, fx] })
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-3">
       {/* Presets */}
       <div className="flex items-center gap-2">
         <label className="text-sm text-slate-600">Presets:</label>
@@ -131,6 +164,36 @@ export default function TemplateToolbar({
           title="Save/Update selected preset with current layout"
         >
           Save
+        </button>
+      </div>
+
+      {/* Divider */}
+      <div className="mx-2 h-5 w-px bg-slate-200" />
+
+      {/* Fixtures quick controls */}
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-slate-600">
+          Fixtures: <span className="font-medium">{cfg.fixtures.length}</span>
+        </span>
+        <select
+          value={String(fixtureType)}
+          onChange={(e) => setFixtureType(e.target.value as unknown as FixtureType)}
+          className="text-sm rounded-md border border-slate-300 bg-white px-2 py-1"
+          title="Fixture type to add"
+        >
+          {FIXTURE_TYPES.map((t) => (
+            <option key={String(t)} value={String(t)}>
+              {String(t)}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className="px-2 py-1 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50"
+          onClick={() => addFixture(fixtureType)}
+          title="Add a fixture of the selected type"
+        >
+          + Add
         </button>
       </div>
 
