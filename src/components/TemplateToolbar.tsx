@@ -12,6 +12,17 @@ const PRESET_LABELS: Record<PresetKey, string> = {
 
 const LS_PREFIX = 'seating.presets.'
 
+function isValidTemplate(x: any): x is TemplateConfig {
+  return (
+    x &&
+    Array.isArray(x.desks) &&
+    typeof x.spacing === 'object' &&
+    typeof x.spacing.cardW === 'number' &&
+    typeof x.spacing.cardH === 'number' &&
+    Array.isArray(x.fixtures)
+  )
+}
+
 function lsGetPreset(key: PresetKey): TemplateConfig | null {
   try {
     const raw = localStorage.getItem(LS_PREFIX + key)
@@ -27,17 +38,6 @@ function lsSetPreset(key: PresetKey, cfg: TemplateConfig) {
   localStorage.setItem(LS_PREFIX + key, JSON.stringify(cfg))
 }
 
-function isValidTemplate(x: any): x is TemplateConfig {
-  return (
-    x &&
-    Array.isArray(x.desks) &&
-    typeof x.spacing === 'object' &&
-    typeof x.spacing.cardW === 'number' &&
-    typeof x.spacing.cardH === 'number' &&
-    Array.isArray(x.fixtures)
-  )
-}
-
 export default function TemplateToolbar({
   cfg,
   onChange,
@@ -48,7 +48,7 @@ export default function TemplateToolbar({
   const fileRef = useRef<HTMLInputElement>(null)
   const [preset, setPreset] = useState<PresetKey>('template-default')
 
-  // Simple fixture types menu (edit as you like)
+  // ---- Fixture picker (kept) ----
   type FixtureType = TemplateConfig['fixtures'][number]['type']
   const FIXTURE_TYPES: FixtureType[] = [
     'teacher-desk',
@@ -58,7 +58,7 @@ export default function TemplateToolbar({
   ] as unknown as FixtureType[]
   const [fixtureType, setFixtureType] = useState<FixtureType>(FIXTURE_TYPES[0])
 
-  // Seed the default preset once if missing
+  // Seed default preset once if missing
   useEffect(() => {
     if (!lsGetPreset('template-default')) {
       lsSetPreset('template-default', cfg)
@@ -111,7 +111,7 @@ export default function TemplateToolbar({
     lsSetPreset(preset, cfg)
   }
 
-  // ----- Fixtures -----
+  // ----- Fixtures (keep Add, remove count) -----
   function pickUniqueId(base: string) {
     const used = new Set(cfg.fixtures.map(f => f.id))
     let n = 1
@@ -126,7 +126,7 @@ export default function TemplateToolbar({
   function addFixture(kind: FixtureType) {
     const base = String(kind).replace(/\s+/g, '-')
     const id = pickUniqueId(base)
-    // Drop new fixtures near the top-left with a tiny offset
+    // Spawn near top-left with a slight offset
     const offset = cfg.fixtures.length * 8
     const fx = { id, type: kind, x: 12 + offset, y: 48 + offset } as TemplateConfig['fixtures'][number]
     onChange({ ...cfg, fixtures: [...cfg.fixtures, fx] })
@@ -170,11 +170,8 @@ export default function TemplateToolbar({
       {/* Divider */}
       <div className="mx-2 h-5 w-px bg-slate-200" />
 
-      {/* Fixtures quick controls */}
+      {/* Fixtures: type picker + add (no count) */}
       <div className="flex items-center gap-2">
-        <span className="text-sm text-slate-600">
-          Fixtures: <span className="font-medium">{cfg.fixtures.length}</span>
-        </span>
         <select
           value={String(fixtureType)}
           onChange={(e) => setFixtureType(e.target.value as unknown as FixtureType)}
