@@ -51,10 +51,9 @@ export default function TemplateToolbar({
   // ---- Fixture picker (kept) ----
   type FixtureType = TemplateConfig['fixtures'][number]['type']
   const FIXTURE_TYPES: FixtureType[] = [
-    'teacher-desk',
+    'tb-desk',
     'door',
     'window',
-    'whiteboard',
   ] as unknown as FixtureType[]
   const [fixtureType, setFixtureType] = useState<FixtureType>(FIXTURE_TYPES[0])
 
@@ -129,10 +128,9 @@ export default function TemplateToolbar({
   const offset = cfg.fixtures.length * 8
 
   const sizeByType: Record<string, { w: number; h: number }> = {
-    'teacher-desk': { w: 140, h: 90 },
+    'tb-desk': { w: 140, h: 90 },
     'door': { w: 40, h: 10 },
     'window': { w: 80, h: 10 },
-    'whiteboard': { w: 220, h: 24 },
   }
   const sz = sizeByType[String(kind)] ?? { w: 120, h: 60 }
 
