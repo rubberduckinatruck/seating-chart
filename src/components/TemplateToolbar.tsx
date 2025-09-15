@@ -23,6 +23,27 @@ function isValidTemplate(x: any): x is TemplateConfig {
   )
 }
 
+// --- Normalization helpers ---
+type CanonType = 'tb-desk' | 'door' | 'window'
+function normType(t: any): CanonType {
+  const s = String(t).toLowerCase().trim()
+  if (s === 'tb-desk' || s === "tb's desk" || s === 'teacher-desk' || s === 'tbdesk' || s === 'tb_desk') return 'tb-desk'
+  if (s === 'door') return 'door'
+  if (s === 'window') return 'window'
+  return 'window'
+}
+
+function normalizeTemplate(input: TemplateConfig): TemplateConfig {
+  return {
+    ...input,
+    fixtures: (input.fixtures || []).map((f: any) => {
+      const { w, h, type, ...rest } = f ?? {}
+      // remove w/h entirely, clamp type, keep id/x/y/anything else relevant
+      return { ...rest, type: normType(type) }
+    }),
+  }
+}
+
 function lsGetPreset(key: PresetKey): TemplateConfig | null {
   try {
     const raw = localStorage.getItem(LS_PREFIX + key)
@@ -48,16 +69,15 @@ export default function TemplateToolbar({
   const fileRef = useRef<HTMLInputElement>(null)
   const [preset, setPreset] = useState<PresetKey>('template-default')
 
-  // ---- Fixture picker ----
-  // Must match Fixture.tsx accepted types exactly:
-  type FixtureType = TemplateConfig['fixtures'][number]['type'] | 'tb-desk' | 'door' | 'window'
+  // Must match Fixture.tsx types exactly:
+  type FixtureType = CanonType
   const FIXTURE_TYPES: FixtureType[] = ['tb-desk', 'door', 'window']
   const [fixtureType, setFixtureType] = useState<FixtureType>(FIXTURE_TYPES[0])
 
-  // Seed default preset once if missing
+  // Seed default preset once if missing (normalized)
   useEffect(() => {
     if (!lsGetPreset('template-default')) {
-      lsSetPreset('template-default', cfg)
+      lsSetPreset('template-default', normalizeTemplate(cfg))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -70,21 +90,7 @@ export default function TemplateToolbar({
       const text = await file.text()
       const json = JSON.parse(text)
       if (!isValidTemplate(json)) throw new Error('Invalid template JSON')
-      // Optional: normalize legacy fixture type names to your canonical keys
-      const normalized: TemplateConfig = {
-        ...json,
-        fixtures: json.fixtures.map((f: any) => ({
-          ...f,
-          // map common aliases to 'tb-desk'
-          type: (String(f.type).toLowerCase() === 'teacher-desk' || String(f.type).toLowerCase() === "tb's desk")
-            ? ('tb-desk' as const)
-            : (f.type as FixtureType),
-          // drop w/h to avoid implying resizability; Fixture.tsx sets fixed sizes
-          w: undefined,
-          h: undefined,
-        })),
-      }
-      onChange(normalized)
+      onChange(normalizeTemplate(json))
     } catch (err) {
       alert(`Import failed: ${(err as Error).message}`)
     } finally {
@@ -93,7 +99,8 @@ export default function TemplateToolbar({
   }
 
   function onExport() {
-    const blob = new Blob([JSON.stringify(cfg, null, 2)], { type: 'application/json' })
+    // Export a normalized view so no w/h ever leave the app
+    const blob = new Blob([JSON.stringify(normalizeTemplate(cfg), null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -109,7 +116,7 @@ export default function TemplateToolbar({
       alert(`No data saved for preset "${PRESET_LABELS[preset]}". Use Save to store the current layout.`)
       return
     }
-    onChange(saved)
+    onChange(normalizeTemplate(saved))
   }
 
   function savePreset() {
@@ -118,10 +125,10 @@ export default function TemplateToolbar({
         ? confirm('Overwrite "Default Paired Columns" with the current layout?')
         : true
     if (!ok) return
-    lsSetPreset(preset, cfg)
+    lsSetPreset(preset, normalizeTemplate(cfg))
   }
 
-  // ----- Fixtures (Add only; no count, no sizes here) -----
+  // ----- Fixtures (Add only; no sizes here) -----
   function pickUniqueId(base: string) {
     const used = new Set(cfg.fixtures.map(f => f.id))
     let n = 1
@@ -138,7 +145,7 @@ export default function TemplateToolbar({
     const id = pickUniqueId(base)
     const offset = cfg.fixtures.length * 8
 
-    // IMPORTANT: do not set w/h here. Fixture.tsx enforces fixed sizes.
+    // IMPORTANT: do not set w/h. Fixture.tsx enforces fixed sizes.
     const fx = {
       id,
       type: kind,
@@ -190,14 +197,14 @@ export default function TemplateToolbar({
       {/* Fixtures: type picker + add */}
       <div className="flex items-center gap-2">
         <select
-          value={String(fixtureType)}
-          onChange={(e) => setFixtureType(e.target.value as unknown as FixtureType)}
+          value={fixtureType}
+          onChange={(e) => setFixtureType(e.target.value as FixtureType)}
           className="text-sm rounded-md border border-slate-300 bg-white px-2 py-1"
           title="Fixture type to add"
         >
           {FIXTURE_TYPES.map((t) => (
-            <option key={String(t)} value={String(t)}>
-              {String(t)}
+            <option key={t} value={t}>
+              {t}
             </option>
           ))}
         </select>
