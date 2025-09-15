@@ -24,11 +24,12 @@ function isValidTemplate(x: any): x is TemplateConfig {
 }
 
 // --- Normalization helpers ---
-type CanonType = 'tb-desk' | 'door' | 'window'
+type CanonType = 'tb-desk' | 'door' | 'window' | 'window-h'
 function normType(t: any): CanonType {
   const s = String(t).toLowerCase().trim()
   if (s === 'tb-desk' || s === "tb's desk" || s === 'teacher-desk' || s === 'tbdesk' || s === 'tb_desk') return 'tb-desk'
   if (s === 'door') return 'door'
+  if (s === 'window-h' || s === 'window_horizontal' || s === 'window-horiz' || s === 'h-window') return 'window-h'
   if (s === 'window') return 'window'
   return 'window'
 }
@@ -71,7 +72,7 @@ export default function TemplateToolbar({
 
   // Must match Fixture.tsx types exactly:
   type FixtureType = CanonType
-  const FIXTURE_TYPES: FixtureType[] = ['tb-desk', 'door', 'window']
+  const FIXTURE_TYPES: FixtureType[] = ['tb-desk', 'door', 'window', 'window-h']
   const [fixtureType, setFixtureType] = useState<FixtureType>(FIXTURE_TYPES[0])
 
   // Seed default preset once if missing (normalized)
