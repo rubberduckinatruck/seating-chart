@@ -1,4 +1,4 @@
-
+// src/tabs/PeriodTab.tsx
 import { useMemo, useState, useRef, useEffect } from 'react'
 import type { PeriodId } from '../lib/constants'
 import { storage } from '../lib/storage'
@@ -27,10 +27,13 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
     () => ({ ...rulesCfg[periodId] })
   )
   const [selectedSeat, setSelectedSeat] = useState<string | null>(null)
-  const students = useMemo(() => studentsCfg[periodId].slice().sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b))), [studentsCfg, periodId])
+  const students = useMemo(
+    () => studentsCfg[periodId].slice().sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b))),
+    [studentsCfg, periodId]
+  )
 
+  // keep conflicts state if you want to surface it later (not rendered now)
   const [conflictNotes, setConflictNotes] = useState<string[]>([])
-  const assignedCount = useMemo(() => Object.values(assignments).filter(Boolean).length, [assignments])
 
   const canvasRef = useRef<HTMLDivElement | null>(null)
 
@@ -96,7 +99,6 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
 
   // Drag from student label onto another seat
   function onDropStudent(toSeatId: string, studentId: string) {
-    // Move student to target seat (swap if target occupied)
     const fromSeatId = Object.keys(assignments).find(k => assignments[k] === studentId) || null
     const targetStudent = assignments[toSeatId] ?? null
     const next = { ...assignments }
@@ -104,30 +106,20 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
     next[toSeatId] = studentId
     setAssignments(next); persistAssignments(next)
   }
-  function onDragStudentStart(_studentId: string) { /* no-op, reserved for future */ }
-
-  function addRule(kind: 'together' | 'apart', pair: [string,string]) {
-    const next = { ...rules }
-    if (kind === 'together') next.together = next.together.concat([pair])
-    else next.apart = next.apart.concat([pair])
-    setRules(next); persistRules(next)
-  }
-  function removeRule(kind: 'together' | 'apart', idx: number) {
-    const next = { ...rules }
-    if (kind === 'together') next.together = next.together.filter((_, i) => i !== idx)
-    else next.apart = next.apart.filter((_, i) => i !== idx)
-    setRules(next); persistRules(next)
-  }
+  function onDragStudentStart(_studentId: string) { /* no-op */ }
 
   const w = template.spacing.cardW
   const h = template.spacing.cardH
 
+  // Nicely formatted header (Period 1, Period 3, ...)
+  const periodLabel = `Period ${periodId.slice(1)}`
+
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold">{periodId.toUpperCase()}</h2>
+      <h2 className="text-lg font-semibold">{periodLabel}</h2>
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-
-
+        {/* Summary panel removed */}
 
         <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
           <div className="font-medium mb-2">Assignment Tools</div>
