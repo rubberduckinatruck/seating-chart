@@ -18,9 +18,16 @@ export default function TemplateTab() {
   const cardW = cfg.spacing.cardW
   const cardH = cfg.spacing.cardH
 
+  // --- centering & sizing ---
+  const gridW = 3 * (2 * cardW + cfg.spacing.withinPair + cfg.spacing.betweenPairs)
+  const gridH = 6 * (cfg.spacing.cardH + cfg.spacing.rowGap) + 100
+  const EXTRA = 480 // tweak: 240/480/600 for more/less side gutter space
+  const outerW = Math.max(900, gridW + EXTRA)
+  const outerH = gridH
+  const leftPad = Math.floor((outerW - gridW) / 2)
+
   // ---- Desks ----
   function moveDesk(id: string, nx: number, ny: number) {
-    // prevent overlap with other desks (simple AABB test)
     const meIdx = cfg.desks.findIndex(d => d.id === id)
     const myRect: Rect = { x: nx, y: ny, w: cardW, h: cardH }
     const collide = cfg.desks.some((d, i) =>
@@ -52,7 +59,6 @@ export default function TemplateTab() {
     }))
   }
 
-
   function removeFixture(id: string) {
     setCfg(prev => ({ ...prev, fixtures: prev.fixtures.filter(f => f.id !== id) }))
   }
@@ -81,7 +87,7 @@ export default function TemplateTab() {
       <h2 className="text-lg font-semibold">Template (Global Layout)</h2>
       <TemplateToolbar cfg={cfg} onChange={setCfg} />
 
-      {/* Spacing controls (so you can see seat size) */}
+      {/* Spacing controls */}
       <div className="flex flex-wrap items-end gap-4">
         <div>
           <label className="block text-xs text-slate-500 mb-1">Within-pair gap (px)</label>
@@ -136,44 +142,46 @@ export default function TemplateTab() {
         </button>
       </div>
 
-      <div className="relative mx-auto border border-slate-200 rounded-lg bg-slate-50 overflow-hidden"
-        style={{
-          width: Math.max(900, 3 * (2 * cardW + cfg.spacing.withinPair + cfg.spacing.betweenPairs)),
-          height: 6 * (cfg.spacing.cardH + cfg.spacing.rowGap) + 100,
-        }}
+      {/* Outer canvas: wider; grid centered inside */}
+      <div
+        className="relative mx-auto border border-slate-200 rounded-lg bg-slate-50 overflow-hidden"
+        style={{ width: outerW, height: outerH }}
       >
         {/* Board indicator (doesn't block drags) */}
         <div className="absolute left-0 right-0 top-2 text-center text-xs text-slate-500 pointer-events-none">
           Front of classroom
         </div>
 
-        {/* Desks */}
-        {cfg.desks.map(d => (
-          <Seat
-            key={d.id}
-            id={d.id}
-            x={d.x}
-            y={d.y}
-            w={cfg.spacing.cardW}
-            h={cfg.spacing.cardH}
-            tags={d.tags}
-            onMove={(nx, ny) => moveDesk(d.id, nx, ny)}
-            onToggleTag={(tag) => toggleDeskTag(d.id, tag)}
-          />
-        ))}
+        {/* Centered inner layer */}
+        <div className="absolute top-0" style={{ left: leftPad, width: gridW, height: outerH }}>
+          {/* Desks */}
+          {cfg.desks.map(d => (
+            <Seat
+              key={d.id}
+              id={d.id}
+              x={d.x}
+              y={d.y}
+              w={cfg.spacing.cardW}
+              h={cfg.spacing.cardH}
+              tags={d.tags}
+              onMove={(nx, ny) => moveDesk(d.id, nx, ny)}
+              onToggleTag={(tag) => toggleDeskTag(d.id, tag)}
+            />
+          ))}
 
-        {/* Fixtures */}
-        {cfg.fixtures.map(f => (
-   <Fixture
-     key={f.id}
-     id={f.id}
-     type={f.type}
-     x={f.x}
-     y={f.y}
-     onMove={(nx, ny) => moveFixture(f.id, nx, ny)}
-     onRemove={() => removeFixture(f.id)}
-          />
-        ))}
+          {/* Fixtures */}
+          {cfg.fixtures.map(f => (
+            <Fixture
+              key={f.id}
+              id={f.id}
+              type={f.type}
+              x={f.x}
+              y={f.y}
+              onMove={(nx, ny) => moveFixture(f.id, nx, ny)}
+              onRemove={() => removeFixture(f.id)}
+            />
+          ))}
+        </div>
       </div>
     </div>
   )
