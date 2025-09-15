@@ -126,22 +126,6 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">{periodId.toUpperCase()}</h2>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
-          <div className="font-medium mb-2">Summary</div>
-          <div>Assigned seats: {assignedCount} / {template.desks.length}</div>
-          <div>Excluded seats: {excluded.size}</div>
-          <div>Together rules: {rules.together.length}</div>
-          <div>Apart rules: {rules.apart.length}</div>
-          {conflictNotes.length > 0 && (
-            <div className="mt-2 text-slate-600">
-              <div className="font-medium text-red-600 mb-1">Conflicts</div>
-              <ul className="list-disc pl-5">
-                {conflictNotes.map((c, i) => <li key={i}>{c}</li>)}
-              </ul>
-            </div>
-          )}
-        </div>
 
         <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
           <div className="font-medium mb-2">Assignment Tools</div>
