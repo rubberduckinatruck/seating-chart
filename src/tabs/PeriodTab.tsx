@@ -163,7 +163,7 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
   const h = template.spacing.cardH
   const gridW = 3 * (2 * w + template.spacing.withinPair + template.spacing.betweenPairs)
   const gridH = 6 * (h + template.spacing.rowGap) + 100
-  const outerW = Math.max(900, gridW + 480) // extra usable margin left/right
+  const outerW = Math.max(900, gridW + 200) // extra usable margin left/right
   const outerH = gridH
   const leftPad = Math.floor((outerW - gridW) / 2)
 
