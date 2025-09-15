@@ -21,7 +21,7 @@ export default function TemplateTab() {
   // --- centering & sizing ---
   const gridW = 3 * (2 * cardW + cfg.spacing.withinPair + cfg.spacing.betweenPairs)
   const gridH = 6 * (cfg.spacing.cardH + cfg.spacing.rowGap) + 100
-  const EXTRA = 480 // tweak: 240/480/600 for more/less side gutter space
+  const EXTRA = 350 // tweak: 240/480/600 for more/less side gutter space
   const outerW = Math.max(900, gridW + EXTRA)
   const outerH = gridH
   const leftPad = Math.floor((outerW - gridW) / 2)
