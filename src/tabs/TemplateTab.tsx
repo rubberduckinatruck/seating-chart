@@ -171,17 +171,14 @@ export default function TemplateTab() {
 
         {/* Fixtures */}
         {cfg.fixtures.map(f => (
-          <Fixture
-            key={f.id}
-            id={f.id}
-            type={f.type}
-            x={f.x}
-            y={f.y}
-            w={f.w}
-            h={f.h}
-            onMove={(nx, ny) => moveFixture(f.id, nx, ny)}
-            onResize={(nw, nh) => resizeFixture(f.id, nw, nh)}
-            onRemove={() => removeFixture(f.id)}
+   <Fixture
+     key={f.id}
+     id={f.id}
+     type={f.type}
+     x={f.x}
+     y={f.y}
+     onMove={(nx, ny) => moveFixture(f.id, nx, ny)}
+     onRemove={() => removeFixture(f.id)}
           />
         ))}
       </div>
