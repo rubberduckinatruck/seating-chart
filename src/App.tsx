@@ -54,7 +54,7 @@ export default function App() {
   if (!ready) {
     return (
       <div className="min-h-screen p-4 md:p-6">
-        <div className="mx-auto max-w-6xl">
+        <div className="mx-auto max-w-none">
           <h1 className="text-2xl font-semibold mb-3">Seating Chart</h1>
           <div>Loading…</div>
         </div>
