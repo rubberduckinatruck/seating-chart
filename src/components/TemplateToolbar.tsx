@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { TemplateConfig } from '../lib/types'
-import { lsGetPreset, normalizeTemplate } from '../lib/presets'
-import { PERIOD_KEYS, readPeriodConfig, writePeriodConfig } from '../lib/periodStorage'
-
+import { storage } from '../lib/storage'
 
 const PRESET_KEYS = ['template-default', 'testing', 'groups'] as const
 type PresetKey = typeof PRESET_KEYS[number]
@@ -132,32 +130,63 @@ export default function TemplateToolbar({
     lsSetPreset(preset, normalizeTemplate(cfg))
   }
 
-  async function copyFixturesToAllPeriods() {
-  const base = lsGetPreset('template-default')
-  if (!base) {
-    alert('No "Default Paired Columns" preset found. Open Template tab and Save it first.')
-    return
+  // ----- Apply fixtures to all periods (robust: detects storage key variant + broadcasts UI update) -----
+  const PERIOD_KEYS = ['p1', 'p3', 'p4', 'p5', 'p6'] as const
+
+  function keyVariants(k: string) {
+    // support multiple storage schemas just in case
+    return [`period.${k}`, `seating.period.${k}`]
   }
-  const fx = normalizeTemplate(base).fixtures
 
-  const ok = confirm(`This will REPLACE fixtures in ${PERIOD_KEYS.length} periods with the preset’s fixtures. Continue?`)
-  if (!ok) return
-
-  let updated = 0
-  for (const k of PERIOD_KEYS) {
-    try {
-      const pc = await readPeriodConfig(k)
-      if (!pc) continue
-      await writePeriodConfig(k, { ...pc, fixtures: fx })
-      updated += 1
-    } catch (e) {
-      console.warn('Failed updating period', k, e)
+  async function readExistingPeriodCfg(k: string) {
+    for (const key of keyVariants(k)) {
+      try {
+        const val = await storage.get<TemplateConfig>(key)
+        if (val) return { key, cfg: val }
+      } catch {
+        // ignore and continue
+      }
     }
+    return null
   }
 
-  alert(`Done. Fixtures copied to ${updated}/${PERIOD_KEYS.length} periods.`)
-}
+  async function writePeriodCfg(bestKey: string, nextCfg: TemplateConfig) {
+    await storage.set(bestKey, nextCfg)
+  }
 
+  async function copyFixturesToAllPeriods() {
+    const base = lsGetPreset('template-default')
+    if (!base) {
+      alert('No "Default Paired Columns" preset found. Open Template tab and Save it first.')
+      return
+    }
+    const fx = normalizeTemplate(base).fixtures
+
+    const ok = confirm(`This will REPLACE fixtures in ${PERIOD_KEYS.length} periods with the preset’s fixtures. Continue?`)
+    if (!ok) return
+
+    let updated = 0
+    for (const k of PERIOD_KEYS) {
+      try {
+        const found = await readExistingPeriodCfg(k)
+        if (!found) continue
+        const next = { ...found.cfg, fixtures: fx }
+        await writePeriodCfg(found.key, next)
+        updated += 1
+      } catch (e) {
+        console.warn('Failed updating period', k, e)
+      }
+    }
+
+    try {
+      // Let any open Period canvases refresh immediately
+      window.dispatchEvent(new CustomEvent('seating:fixtures-updated', { detail: { fixtures: fx } }))
+    } catch {
+      // ignore if CustomEvent not available
+    }
+
+    alert(`Done. Fixtures copied to ${updated}/${PERIOD_KEYS.length} periods.`)
+  }
 
   // ----- Fixtures (Add only; no sizes here) -----
   function pickUniqueId(base: string) {
@@ -250,14 +279,13 @@ export default function TemplateToolbar({
       </div>
 
       <button
-  type="button"
-  className="px-2 py-1 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50"
-  onClick={copyFixturesToAllPeriods}
-  title="Overwrite fixtures on every period with the current preset’s fixtures"
->
-  Apply fixtures
-</button>
-
+        type="button"
+        className="px-2 py-1 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50"
+        onClick={copyFixturesToAllPeriods}
+        title="Overwrite fixtures on every period with the current preset’s fixtures"
+      >
+        Apply fixtures
+      </button>
 
       {/* Divider */}
       <div className="mx-2 h-5 w-px bg-slate-200" />
