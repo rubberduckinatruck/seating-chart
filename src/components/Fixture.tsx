@@ -13,6 +13,7 @@ type Props = {
 
 const TYPE_LABEL: Record<string, string> = {
   window: 'Window',
+  'window-h': 'Window',
   door: 'Door',
   'tb-desk': "TB's Desk",
 }
@@ -20,6 +21,7 @@ const TYPE_LABEL: Record<string, string> = {
 // Fixed sizes (UI cannot resize)
 const TYPE_DEFAULT_SIZE: Record<string, { w: number; h: number }> = {
   window:   { w: 10,  h: 120 }, // tall + skinny
+  'window-h':{ w: 120, h: 10 },   // horizontal
   door:     { w: 10,  h: 120 }, // tall + skinny
   'tb-desk':{ w: 90,  h: 120 }, // larger desk
 }
