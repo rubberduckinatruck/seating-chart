@@ -125,6 +125,8 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">{periodId.toUpperCase()}</h2>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+
 
 
         <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
