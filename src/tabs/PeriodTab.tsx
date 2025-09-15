@@ -17,37 +17,87 @@ import ExportButtons from '../components/ExportButtons'
 import Fixture from '../components/Fixture'
 
 export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
-  // force refresh when fixtures are broadcast-updated
+  // Force a refresh when broadcast events or storage updates happen
   const [, setRefreshTick] = useState(0)
+
+  // --- Broadcast listeners (fixtures/students updated) + storage sync across tabs ---
   useEffect(() => {
-    function handleFxUpdate() {
-      // trigger a re-render so we re-read template from storage
+    function bump() {
+      // Trigger re-render so we re-read storage (template, students, etc.)
       setRefreshTick(t => t + 1)
     }
-    window.addEventListener('seating:fixtures-updated', handleFxUpdate as EventListener)
-    return () => window.removeEventListener('seating:fixtures-updated', handleFxUpdate as EventListener)
+    function onFixturesUpdated() { bump() }
+    function onStudentsUpdated() { bump() }
+    function onStorage(e: StorageEvent) {
+      // react only to our app's keys (prefix 'seating.')
+      if (!e.key || !e.key.startsWith('seating.')) return
+      bump()
+    }
+
+    window.addEventListener('seating:fixtures-updated', onFixturesUpdated as EventListener)
+    window.addEventListener('seating:students-updated', onStudentsUpdated as EventListener)
+    window.addEventListener('storage', onStorage)
+
+    return () => {
+      window.removeEventListener('seating:fixtures-updated', onFixturesUpdated as EventListener)
+      window.removeEventListener('seating:students-updated', onStudentsUpdated as EventListener)
+      window.removeEventListener('storage', onStorage)
+    }
   }, [])
 
-  // snapshot config/state from storage
+  // Snapshot config/state from storage on each render (will update when refreshTick bumps)
   const template = storage.getTemplate()
   const studentsCfg = storage.getStudents()
   const rulesCfg = storage.getRules()
   const excludedCfg = storage.getExcluded()
   const assignCfg = storage.getAssignments()
 
-  // local state per period
+  // ----- helpers that depend on current template -----
+  function blankAssignments(): Record<string, string | null> {
+    const next: Record<string, string | null> = {}
+    for (const d of template.desks) next[d.id] = null
+    return next
+  }
+
+  function buildAssignmentsForPeriod(pid: PeriodId): Record<string, string | null> {
+    const saved = assignCfg[pid] || {}
+    // Ensure all seats exist with null by default, then overlay saved
+    return { ...blankAssignments(), ...saved }
+  }
+
+  function buildExcludedForPeriod(pid: PeriodId): Set<string> {
+    const savedArr = excludedCfg[pid] || []
+    return new Set(savedArr)
+  }
+
+  function buildRulesForPeriod(pid: PeriodId): { together: [string, string][]; apart: [string, string][] } {
+    const saved = rulesCfg[pid] || { together: [], apart: [] }
+    return { together: saved.together.slice(), apart: saved.apart.slice() }
+  }
+
+  // Local state per period (initialized from current storage snapshot)
   const [assignments, setAssignments] = useState<Record<string, string | null>>(
-    () => ({ ...assignCfg[periodId] })
+    () => buildAssignmentsForPeriod(periodId)
   )
   const [excluded, setExcluded] = useState<Set<string>>(
-    () => new Set(excludedCfg[periodId])
+    () => buildExcludedForPeriod(periodId)
   )
   const [rules, setRules] = useState<{ together: [string, string][]; apart: [string, string][] }>(
-    () => ({ ...rulesCfg[periodId] })
+    () => buildRulesForPeriod(periodId)
   )
   const [selectedSeat, setSelectedSeat] = useState<string | null>(null)
   const [conflictNotes, setConflictNotes] = useState<string[]>([]) // kept for future UI
 
+  // Re-hydrate period-local state whenever periodId changes
+  useEffect(() => {
+    setAssignments(buildAssignmentsForPeriod(periodId))
+    setExcluded(buildExcludedForPeriod(periodId))
+    setRules(buildRulesForPeriod(periodId))
+    setSelectedSeat(null)
+    setConflictNotes([])
+  }, [periodId])
+
+  // Students list for this period (will refresh when refreshTick bumps, since we re-read studentsCfg above)
   const students = useMemo(
     () =>
       studentsCfg[periodId]
@@ -77,8 +127,7 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
 
   // ----- toolbar actions -----
   function clearAll() {
-    const next: Record<string, string | null> = {}
-    for (const d of template.desks) next[d.id] = null
+    const next = blankAssignments()
     setAssignments(next)
     persistAssignments(next)
   }
@@ -86,8 +135,7 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
   function randomize() {
     const ctx: AssignContext = { template, students, excluded, rules }
     const res = assignSeating(ctx, 'random')
-    const next: Record<string, string | null> = {}
-    for (const d of template.desks) next[d.id] = null
+    const next = blankAssignments()
     for (const [sid, seatId] of res.seatOf.entries()) next[seatId] = sid
     setAssignments(next)
     persistAssignments(next)
@@ -97,8 +145,7 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
   function sortAlpha() {
     const ctx: AssignContext = { template, students, excluded, rules }
     const res = assignSeating(ctx, 'alpha')
-    const next: Record<string, string | null> = {}
-    for (const d of template.desks) next[d.id] = null
+    const next = blankAssignments()
     for (const [sid, seatId] of res.seatOf.entries()) next[seatId] = sid
     setAssignments(next)
     persistAssignments(next)
