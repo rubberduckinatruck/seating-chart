@@ -170,7 +170,7 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
       <div
         id="period-canvas"
         ref={canvasRef}
-        className="relative border border-slate-200 rounded-lg bg-slate-50 overflow-hidden"
+        className="relative mx-auto border border-slate-50 rounded-lg bg-slate-50 overflow-hidden"
         style={{
           width: Math.max(900, 3 * (2 * template.spacing.cardW + template.spacing.withinPair + template.spacing.betweenPairs)),
           height: 6 * (template.spacing.cardH + template.spacing.rowGap) + 100,
