@@ -1,5 +1,5 @@
 // src/tabs/PeriodTab.tsx
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { PeriodId } from '../lib/constants'
 import { storage } from '../lib/storage'
 import type {
@@ -14,8 +14,20 @@ import AssignmentToolbar from '../components/AssignmentToolbar'
 import RulesManager from '../components/RulesManager'
 import { assignSeating, type AssignContext } from '../lib/assign'
 import ExportButtons from '../components/ExportButtons'
+import Fixture from '../components/Fixture'
 
 export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
+  // force refresh when fixtures are broadcast-updated
+  const [, setRefreshTick] = useState(0)
+  useEffect(() => {
+    function handleFxUpdate() {
+      // trigger a re-render so we re-read template from storage
+      setRefreshTick(t => t + 1)
+    }
+    window.addEventListener('seating:fixtures-updated', handleFxUpdate as EventListener)
+    return () => window.removeEventListener('seating:fixtures-updated', handleFxUpdate as EventListener)
+  }, [])
+
   // snapshot config/state from storage
   const template = storage.getTemplate()
   const studentsCfg = storage.getStudents()
@@ -244,6 +256,24 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
       >
         <div className="absolute left-0 right-0 top-2 text-center text-xs text-slate-500">
           Front of classroom
+        </div>
+
+        {/* Fixtures layer (non-interactive; mirrors template fixtures) */}
+        <div
+          className="absolute top-0 pointer-events-none"
+          style={{ left: leftPad, width: gridW, height: outerH }}
+        >
+          {template.fixtures?.map((f) => (
+            <Fixture
+              key={f.id}
+              id={f.id}
+              type={f.type as any}
+              x={f.x}
+              y={f.y}
+              onMove={() => {}}
+              onRemove={() => {}}
+            />
+          ))}
         </div>
 
         <div className="absolute top-0" style={{ left: leftPad, width: gridW, height: outerH }}>
