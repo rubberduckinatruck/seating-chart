@@ -88,9 +88,15 @@ export default function Fixture({ id, type, x, y, onMove, onRemove }: Props) {
       </div>
 
       {/* Centered label */}
-      <div className={`absolute inset-0 flex items-center justify-center ${style.text} text-[12px] font-medium`}>
-        {label}
-      </div>
+      <div
+  className={[
+    "absolute inset-0 flex items-center justify-center text-[12px] font-medium",
+    style.text,
+    (type === "window" || type === "door") ? "rotate-90 origin-center" : "",
+  ].join(" ")}
+>
+  {label}
+</div>
     </div>
   )
 }
