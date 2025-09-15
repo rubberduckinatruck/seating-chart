@@ -65,7 +65,7 @@ export default function App() {
   if (error) {
     return (
       <div className="min-h-screen p-4 md:p-6">
-        <div className="mx-auto max-w-6xl">
+        <div className="mx-auto max-w-none">
           <h1 className="text-2xl font-semibold mb-3">Seating Chart</h1>
           <div className="text-red-600">Error: {error}</div>
         </div>
@@ -75,7 +75,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen p-4 md:p-6">
-      <div className="mx-auto max-w-6xl">
+      <div className="mx-auto max-w-none">
         <h1 className="text-2xl font-semibold mb-3">Seating Chart</h1>
         <Tabs
           tabs={tabs}
