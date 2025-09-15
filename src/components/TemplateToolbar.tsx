@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { TemplateConfig } from '../lib/types'
+import { lsGetPreset, normalizeTemplate } from '../lib/presets'
+import { PERIOD_KEYS, readPeriodConfig, writePeriodConfig } from '../lib/periodStorage'
+
 
 const PRESET_KEYS = ['template-default', 'testing', 'groups'] as const
 type PresetKey = typeof PRESET_KEYS[number]
@@ -129,6 +132,33 @@ export default function TemplateToolbar({
     lsSetPreset(preset, normalizeTemplate(cfg))
   }
 
+  async function copyFixturesToAllPeriods() {
+  const base = lsGetPreset('template-default')
+  if (!base) {
+    alert('No "Default Paired Columns" preset found. Open Template tab and Save it first.')
+    return
+  }
+  const fx = normalizeTemplate(base).fixtures
+
+  const ok = confirm(`This will REPLACE fixtures in ${PERIOD_KEYS.length} periods with the preset’s fixtures. Continue?`)
+  if (!ok) return
+
+  let updated = 0
+  for (const k of PERIOD_KEYS) {
+    try {
+      const pc = await readPeriodConfig(k)
+      if (!pc) continue
+      await writePeriodConfig(k, { ...pc, fixtures: fx })
+      updated += 1
+    } catch (e) {
+      console.warn('Failed updating period', k, e)
+    }
+  }
+
+  alert(`Done. Fixtures copied to ${updated}/${PERIOD_KEYS.length} periods.`)
+}
+
+
   // ----- Fixtures (Add only; no sizes here) -----
   function pickUniqueId(base: string) {
     const used = new Set(cfg.fixtures.map(f => f.id))
@@ -218,6 +248,16 @@ export default function TemplateToolbar({
           + Add
         </button>
       </div>
+
+      <button
+  type="button"
+  className="px-2 py-1 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50"
+  onClick={copyFixturesToAllPeriods}
+  title="Overwrite fixtures on every period with the current preset’s fixtures"
+>
+  Apply fixtures
+</button>
+
 
       {/* Divider */}
       <div className="mx-2 h-5 w-px bg-slate-200" />
