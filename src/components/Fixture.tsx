@@ -1,5 +1,5 @@
 // src/components/Fixture.tsx
-import React, { useRef, useState } from 'react'
+import React, { useRef } from 'react'
 import { snap } from '../lib/drag'
 
 type Props = {
@@ -18,8 +18,8 @@ const TYPE_LABEL: Record<string, string> = {
 }
 
 const TYPE_DEFAULT_SIZE: Record<string, { w: number; h: number }> = {
-  'window': { w: 20, h: 80 },
-  'door': { w: 20, h: 80 },
+  'window': { w: 10, h: 120 },
+  'door': { w: 10, h: 120 },
   'tb-desk': { w: 90, h: 120 },
 }
 
