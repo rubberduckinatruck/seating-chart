@@ -52,8 +52,8 @@ export function ensureSchemaInitialized() {
 // Within-pair gap: 8, Between-pairs gap: 22, Row gap: 14,
 // Card width: 120, Card min-height: 156
 function defaultTemplate(): TemplateConfig {
-  const within = 8
-  const between = 22
+  const within = 0
+  const between = 75
   const rowGap = 14
   const cardW = 120
   const cardH = 156
