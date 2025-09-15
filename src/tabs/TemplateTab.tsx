@@ -52,12 +52,6 @@ export default function TemplateTab() {
     }))
   }
 
-  function resizeFixture(id: string, nw: number, nh: number) {
-    setCfg(prev => ({
-      ...prev,
-      fixtures: prev.fixtures.map(f => (f.id === id ? { ...f, w: nw, h: nh } : f)),
-    }))
-  }
 
   function removeFixture(id: string) {
     setCfg(prev => ({ ...prev, fixtures: prev.fixtures.filter(f => f.id !== id) }))
