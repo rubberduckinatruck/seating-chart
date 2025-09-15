@@ -136,8 +136,7 @@ export default function TemplateTab() {
         </button>
       </div>
 
-      <div
-        className="relative border border-slate-200 rounded-lg bg-slate-50 overflow-hidden"
+      <div className="relative mx-auto border border-slate-200 rounded-lg bg-slate-50 overflow-hidden"
         style={{
           width: Math.max(900, 3 * (2 * cardW + cfg.spacing.withinPair + cfg.spacing.betweenPairs)),
           height: 6 * (cfg.spacing.cardH + cfg.spacing.rowGap) + 100,
