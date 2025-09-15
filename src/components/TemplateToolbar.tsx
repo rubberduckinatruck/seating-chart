@@ -48,13 +48,10 @@ export default function TemplateToolbar({
   const fileRef = useRef<HTMLInputElement>(null)
   const [preset, setPreset] = useState<PresetKey>('template-default')
 
-  // ---- Fixture picker (kept) ----
-  type FixtureType = TemplateConfig['fixtures'][number]['type']
-  const FIXTURE_TYPES: FixtureType[] = [
-    'tb-desk',
-    'door',
-    'window',
-  ] as unknown as FixtureType[]
+  // ---- Fixture picker ----
+  // Must match Fixture.tsx accepted types exactly:
+  type FixtureType = TemplateConfig['fixtures'][number]['type'] | 'tb-desk' | 'door' | 'window'
+  const FIXTURE_TYPES: FixtureType[] = ['tb-desk', 'door', 'window']
   const [fixtureType, setFixtureType] = useState<FixtureType>(FIXTURE_TYPES[0])
 
   // Seed default preset once if missing
@@ -73,7 +70,21 @@ export default function TemplateToolbar({
       const text = await file.text()
       const json = JSON.parse(text)
       if (!isValidTemplate(json)) throw new Error('Invalid template JSON')
-      onChange(json as TemplateConfig)
+      // Optional: normalize legacy fixture type names to your canonical keys
+      const normalized: TemplateConfig = {
+        ...json,
+        fixtures: json.fixtures.map((f: any) => ({
+          ...f,
+          // map common aliases to 'tb-desk'
+          type: (String(f.type).toLowerCase() === 'teacher-desk' || String(f.type).toLowerCase() === "tb's desk")
+            ? ('tb-desk' as const)
+            : (f.type as FixtureType),
+          // drop w/h to avoid implying resizability; Fixture.tsx sets fixed sizes
+          w: undefined,
+          h: undefined,
+        })),
+      }
+      onChange(normalized)
     } catch (err) {
       alert(`Import failed: ${(err as Error).message}`)
     } finally {
@@ -104,13 +115,13 @@ export default function TemplateToolbar({
   function savePreset() {
     const ok =
       preset === 'template-default'
-        ? confirm('Overwrite "Default Layout" with the current layout?')
+        ? confirm('Overwrite "Default Paired Columns" with the current layout?')
         : true
     if (!ok) return
     lsSetPreset(preset, cfg)
   }
 
-  // ----- Fixtures (keep Add, remove count) -----
+  // ----- Fixtures (Add only; no count, no sizes here) -----
   function pickUniqueId(base: string) {
     const used = new Set(cfg.fixtures.map(f => f.id))
     let n = 1
@@ -123,29 +134,20 @@ export default function TemplateToolbar({
   }
 
   function addFixture(kind: FixtureType) {
-  const base = String(kind).replace(/\s+/g, '-')
-  const id = pickUniqueId(base)
-  const offset = cfg.fixtures.length * 8
+    const base = String(kind).replace(/\s+/g, '-')
+    const id = pickUniqueId(base)
+    const offset = cfg.fixtures.length * 8
 
-  const sizeByType: Record<string, { w: number; h: number }> = {
-    'tb-desk': { w: 80, h: 120 },
-    'door': { w: 40, h: 80 },
-    'window': { w: 40, h: 80 },
+    // IMPORTANT: do not set w/h here. Fixture.tsx enforces fixed sizes.
+    const fx = {
+      id,
+      type: kind,
+      x: 12 + offset,
+      y: 48 + offset,
+    } as TemplateConfig['fixtures'][number]
+
+    onChange({ ...cfg, fixtures: [...cfg.fixtures, fx] })
   }
-  const sz = sizeByType[String(kind)] ?? { w: 120, h: 60 }
-
-  const fx = {
-    id,
-    type: kind,
-    x: 12 + offset,
-    y: 48 + offset,
-    w: sz.w,
-    h: sz.h,
-  } as TemplateConfig['fixtures'][number]
-
-  onChange({ ...cfg, fixtures: [...cfg.fixtures, fx] })
-}
-
 
   return (
     <div className="flex flex-wrap items-center gap-3">
@@ -185,7 +187,7 @@ export default function TemplateToolbar({
       {/* Divider */}
       <div className="mx-2 h-5 w-px bg-slate-200" />
 
-      {/* Fixtures: type picker + add (no count) */}
+      {/* Fixtures: type picker + add */}
       <div className="flex items-center gap-2">
         <select
           value={String(fixtureType)}
