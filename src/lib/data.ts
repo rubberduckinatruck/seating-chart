@@ -1,11 +1,12 @@
 // src/lib/data.ts
 import { PERIODS, type PeriodId } from './constants'
-import type { StudentsConfig, StudentMeta } from './types'
+import type { StudentsConfig, StudentMeta, PeriodAssignments } from './types'
 import { storage } from './storage'
+import { broadcastStudentsUpdated } from './broadcast'
 
 // Join BASE_URL + path without using new URL on a relative base
 function withBase(p: string) {
-  const base = (import.meta.env && import.meta.env.BASE_URL) || '/'
+  const base = (import.meta.env && (import.meta.env as any).BASE_URL) || '/'
   return (
     (base.endsWith('/') ? base : base + '/') +
     p.replace(/^\/+/, '')
@@ -45,6 +46,20 @@ async function fetchManifest(period: PeriodId): Promise<StudentMeta[]> {
   }))
 }
 
+// Optional: read top-level aggregator version if present (public/photos/index.json)
+async function fetchTopIndexVersion(): Promise<string | undefined> {
+  try {
+    const url = withBase(`photos/index.json?_=${Date.now()}`)
+    const res = await fetch(url, { cache: 'no-store' })
+    if (!res.ok) return undefined
+    const json = await res.json()
+    const v = (json as any)?.version
+    return v === undefined ? undefined : String(v)
+  } catch {
+    return undefined
+  }
+}
+
 export async function syncStudentsFromManifests(): Promise<StudentsConfig> {
   const local = storage.getStudents()
   const merged: StudentsConfig = { p1: [], p3: [], p4: [], p5: [], p6: [] }
@@ -55,9 +70,11 @@ export async function syncStudentsFromManifests(): Promise<StudentsConfig> {
       const mapLocal = new Map(local[period].map((s) => [s.id, s]))
       const out: StudentMeta[] = []
 
+      // Build from remote = source of truth for existence (adds + removes)
       for (const r of remote) {
         const l = mapLocal.get(r.id)
         if (l) {
+          // Preserve local edits when present; fall back to remote placeholder values
           out.push({
             id: r.id,
             name: l.name ?? r.name,
@@ -78,6 +95,56 @@ export async function syncStudentsFromManifests(): Promise<StudentsConfig> {
     }
   }
 
+  // Persist merged roster
   storage.setStudents(merged)
+
+  // Auto-unassign seats whose student IDs no longer exist after merge
+  try {
+    const assignments = storage.getAssignments() as PeriodAssignments
+    let anyChanged = false
+
+    for (const pid of PERIODS) {
+      const validIds = new Set(merged[pid].map((s) => s.id))
+      const curr = { ...(assignments[pid] || {}) }
+      let changed = false
+
+      for (const seatId of Object.keys(curr)) {
+        const sid = curr[seatId]
+        if (sid && !validIds.has(sid)) {
+          curr[seatId] = null
+          changed = true
+        }
+      }
+
+      if (changed) {
+        assignments[pid] = curr
+        anyChanged = true
+      }
+    }
+
+    if (anyChanged) {
+      storage.setAssignments(assignments)
+    }
+  } catch (e) {
+    console.warn('sync: failed to auto-unassign removed students:', e)
+  }
+
+  // Remember manifest version if available (from top-level aggregator)
+  try {
+    const ver = await fetchTopIndexVersion()
+    if (ver !== undefined) {
+      localStorage.setItem('seating.photos.version', ver)
+    }
+  } catch {
+    // ignore
+  }
+
+  // Notify the rest of the app (Students & Period tabs) to refresh
+  try {
+    broadcastStudentsUpdated()
+  } catch {
+    // ignore
+  }
+
   return merged
 }
