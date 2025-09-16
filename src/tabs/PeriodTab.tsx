@@ -1,329 +1,309 @@
 // src/tabs/PeriodTab.tsx
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { PeriodId } from '../lib/constants'
-import { storage } from '../lib/storage'
-import type {
-  PeriodAssignments,
-  RulesConfig,
-  ExcludedSeats,
-  StudentMeta,
-} from '../lib/types'
-import { getDisplayName } from '../lib/utils'
-import PeriodSeat from '../components/PeriodSeat'
-import AssignmentToolbar from '../components/AssignmentToolbar'
-import RulesManager from '../components/RulesManager'
-import { assignSeating, type AssignContext } from '../lib/assign'
-import ExportButtons from '../components/ExportButtons'
-import Fixture from '../components/Fixture'
+import { useEffect, useMemo, useState } from "react";
+import { DndContext, DragEndEvent, DragOverlay, useSensor, useSensors, PointerSensor, KeyboardSensor } from "@dnd-kit/core";
+import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { restrictToParentElement, restrictToWindowEdges } from "@dnd-kit/modifiers";
+import { storage } from "../lib/storage";
 
-export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
-  // force refresh when fixtures/students are broadcast-updated
-  const [, setRefreshTick] = useState(0)
+type Student = {
+  id: string;
+  name: string;
+  photo?: string;
+};
+
+type SeatingMap = Record<string, string | null>; // seatId -> studentId|null
+
+// Configure your grid here
+const ROWS = 6;
+const COLS = 6;
+
+// Build seat ids like "r0c0", "r0c1", ...
+function seatId(r: number, c: number) {
+  return `r${r}c${c}`;
+}
+
+function seatIds() {
+  const ids: string[] = [];
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) ids.push(seatId(r, c));
+  return ids;
+}
+
+type PeriodTabProps = {
+  periodId: string;                // logical id for storage (e.g., "p1")
+  students: Student[];             // roster for this period
+  title?: string;
+};
+
+export default function PeriodTab({ periodId, students, title = "Seating" }: PeriodTabProps) {
+  const STORAGE_KEY = `period:${periodId}:seating`;
+
+  // Build initial blank seating, then hydrate from storage
+  const blankSeating: SeatingMap = useMemo(() => {
+    const base: SeatingMap = {};
+    for (const id of seatIds()) base[id] = null;
+    return base;
+  }, []);
+
+  const [seating, setSeating] = useState<SeatingMap>(blankSeating);
+  const [activeStudent, setActiveStudent] = useState<Student | null>(null);
+
+  // For quick demo, auto-place any unseated students into first open seats
+  // (If you already assign seats elsewhere, you can remove this bit)
   useEffect(() => {
-    function bump() { setRefreshTick(t => t + 1) }
-    function onFx() { bump() }
-    function onStudents() { bump() }
-    function onStorage(e: StorageEvent) {
-      if (!e.key || !e.key.startsWith('seating.')) return
-      bump()
+    const saved = storage.get<SeatingMap>(STORAGE_KEY);
+    if (saved) {
+      setSeating(saved);
+      return;
     }
-    window.addEventListener('seating:fixtures-updated', onFx as EventListener)
-    window.addEventListener('seating:students-updated', onStudents as EventListener)
-    window.addEventListener('storage', onStorage)
-    return () => {
-      window.removeEventListener('seating:fixtures-updated', onFx as EventListener)
-      window.removeEventListener('seating:students-updated', onStudents as EventListener)
-      window.removeEventListener('storage', onStorage)
+    const next = { ...blankSeating };
+    const unfilled = seatIds();
+    let idx = 0;
+    for (const s of students) {
+      // skip if already seated (shouldn’t happen on first run)
+      if (Object.values(next).includes(s.id)) continue;
+      // find next open
+      while (idx < unfilled.length && next[unfilled[idx]] !== null) idx++;
+      if (idx < unfilled.length) next[unfilled[idx]] = s.id;
     }
-  }, [])
+    setSeating(next);
+    storage.set(STORAGE_KEY, next);
+  }, [STORAGE_KEY, blankSeating, students]);
 
-  // snapshot config/state from storage
-  const template = storage.getTemplate()
-  const studentsCfg = storage.getStudents()
-  const rulesCfg = storage.getRules()
-  const excludedCfg = storage.getExcluded()
-  const assignCfg = storage.getAssignments()
+  // Build lookup for convenience
+  const byId = useMemo(() => {
+    const m = new Map<string, Student>();
+    for (const s of students) m.set(s.id, s);
+    return m;
+  }, [students]);
 
-  // helpers based on current template
-  function blankAssignments(): Record<string, string | null> {
-    const next: Record<string, string | null> = {}
-    for (const d of template.desks) next[d.id] = null
-    return next
-  }
-  function buildAssignmentsForPeriod(pid: PeriodId): Record<string, string | null> {
-    const saved = assignCfg[pid] || {}
-    return { ...blankAssignments(), ...saved }
-  }
-  function buildExcludedForPeriod(pid: PeriodId): Set<string> {
-    const savedArr = excludedCfg[pid] || []
-    return new Set(savedArr)
-  }
-  function buildRulesForPeriod(pid: PeriodId): { together: [string, string][]; apart: [string, string][] } {
-    const saved = rulesCfg[pid] || { together: [], apart: [] }
-    return { together: saved.together.slice(), apart: saved.apart.slice() }
-  }
+  // DnD sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
 
-  // local state per period
-  const [assignments, setAssignments] = useState<Record<string, string | null>>(
-    () => buildAssignmentsForPeriod(periodId)
-  )
-  const [excluded, setExcluded] = useState<Set<string>>(
-    () => buildExcludedForPeriod(periodId)
-  )
-  const [rules, setRules] = useState<{ together: [string, string][]; apart: [string, string][] }>(
-    () => buildRulesForPeriod(periodId)
-  )
-  const [selectedSeat, setSelectedSeat] = useState<string | null>(null)
-  const [conflictNotes, setConflictNotes] = useState<string[]>([])
-
-  // re-hydrate when period changes
-  useEffect(() => {
-    setAssignments(buildAssignmentsForPeriod(periodId))
-    setExcluded(buildExcludedForPeriod(periodId))
-    setRules(buildRulesForPeriod(periodId))
-    setSelectedSeat(null)
-    setConflictNotes([])
-  }, [periodId])
-
-  const students = useMemo(
-    () =>
-      studentsCfg[periodId]
-        .slice()
-        .sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b))),
-    [studentsCfg, periodId]
-  )
-
-  const canvasRef = useRef<HTMLDivElement | null>(null)
-
-  // persist helpers
-  function persistAssignments(next: Record<string, string | null>) {
-    const all: PeriodAssignments = storage.getAssignments()
-    all[periodId] = next
-    storage.setAssignments(all)
-  }
-  function persistExcluded(next: Set<string>) {
-    const all: ExcludedSeats = storage.getExcluded()
-    all[periodId] = Array.from(next)
-    storage.setExcluded(all)
-  }
-  function persistRules(next: { together: [string, string][]; apart: [string, string][] }) {
-    const all: RulesConfig = storage.getRules()
-    all[periodId] = { together: next.together.slice(), apart: next.apart.slice() }
-    storage.setRules(all)
-  }
-
-  // toolbar actions
-  function clearAll() {
-    const next = blankAssignments()
-    setAssignments(next)
-    persistAssignments(next)
-  }
-  function randomize() {
-    const ctx: AssignContext = { template, students, excluded, rules }
-    const res = assignSeating(ctx, 'random')
-    const next = blankAssignments()
-    for (const [sid, seatId] of res.seatOf.entries()) next[seatId] = sid
-    setAssignments(next)
-    persistAssignments(next)
-    setConflictNotes(res.conflicts)
-  }
-  function sortAlpha() {
-    const ctx: AssignContext = { template, students, excluded, rules }
-    const res = assignSeating(ctx, 'alpha')
-    const next = blankAssignments()
-    for (const [sid, seatId] of res.seatOf.entries()) next[seatId] = sid
-    setAssignments(next)
-    persistAssignments(next)
-    setConflictNotes(res.conflicts)
-  }
-
-  // seat interactions
-  function onSeatClick(seatId: string) {
-    if (selectedSeat === null) { setSelectedSeat(seatId); return }
-    if (selectedSeat === seatId) { setSelectedSeat(null); return }
-    const a = assignments[selectedSeat] ?? null
-    const b = assignments[seatId] ?? null
-    const next = { ...assignments, [selectedSeat]: b, [seatId]: a }
-    setAssignments(next)
-    persistAssignments(next)
-    setSelectedSeat(null)
-  }
-  function toggleExcluded(seatId: string) {
-    const next = new Set(excluded)
-    if (next.has(seatId)) next.delete(seatId)
-    else next.add(seatId)
-    setExcluded(next)
-    persistExcluded(next)
-  }
-  function unassignSeat(seatId: string) {
-    const next = { ...assignments, [seatId]: null }
-    setAssignments(next)
-    persistAssignments(next)
-  }
-  function onDropStudent(toSeatId: string, studentId: string) {
-    const fromSeatId = Object.keys(assignments).find(k => assignments[k] === studentId) || null
-    const targetStudent = assignments[toSeatId] ?? null
-    const next = { ...assignments }
-    if (fromSeatId) next[fromSeatId] = targetStudent
-    next[toSeatId] = studentId
-    setAssignments(next)
-    persistAssignments(next)
-  }
-
-  // rules helpers
-  function addRule(kind: 'together' | 'apart', pair: [string, string]) {
-    const next =
-      kind === 'together'
-        ? { ...rules, together: rules.together.concat([pair]) }
-        : { ...rules, apart: rules.apart.concat([pair]) }
-    setRules(next)
-    persistRules(next)
-  }
-  function removeRule(kind: 'together' | 'apart', idx: number) {
-    const next =
-      kind === 'together'
-        ? { ...rules, together: rules.together.filter((_, i) => i !== idx) }
-        : { ...rules, apart: rules.apart.filter((_, i) => i !== idx) }
-    setRules(next)
-    persistRules(next)
-  }
-
-  // canvas sizing / centering
-  const w = template.spacing.cardW
-  const h = template.spacing.cardH
-  const gridW = 3 * (2 * w + template.spacing.withinPair + template.spacing.betweenPairs)
-  const gridH = 6 * (h + template.spacing.rowGap) + 100
-  const outerW = Math.max(900, gridW + 200)
-  const outerH = gridH
-  const leftPad = Math.floor((outerW - gridW) / 2)
-
-  const periodLabel = `Period ${periodId.slice(1)}`
-
-  // Rules dropdown on header row
-  const [openRules, setOpenRules] = useState(false)
-  const rulesRef = useRef<HTMLDivElement | null>(null)
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') setOpenRules(false) }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
-  useEffect(() => {
-    function onDoc(e: MouseEvent) {
-      if (!openRules) return
-      const n = e.target as Node
-      if (rulesRef.current && !rulesRef.current.contains(n)) setOpenRules(false)
+  function getStudentAtSeat(id: string): Student | null {
+    const sid = seating[id];
+    return sid ? byId.get(sid) ?? null : null;
     }
-    document.addEventListener('mousedown', onDoc)
-    return () => document.removeEventListener('mousedown', onDoc)
-  }, [openRules])
+  
+  function swapSeats(fromSeat: string, toSeat: string) {
+    setSeating(prev => {
+      const next = { ...prev };
+      const a = next[fromSeat];
+      const b = next[toSeat];
+      next[fromSeat] = b ?? null;
+      next[toSeat] = a ?? null;
+      storage.set(STORAGE_KEY, next);
+      return next;
+    });
+  }
+
+  function moveToEmpty(fromSeat: string, toSeat: string, studentId: string) {
+    setSeating(prev => {
+      const next = { ...prev };
+      next[fromSeat] = null;
+      next[toSeat] = studentId;
+      storage.set(STORAGE_KEY, next);
+      return next;
+    });
+  }
+
+  function onDragEnd(evt: DragEndEvent) {
+    const { active, over } = evt;
+    setActiveStudent(null);
+    if (!over) return;
+
+    // metadata set on draggable
+    const fromSeat = active.data.current?.seatId as string | undefined;
+    const studentId = active.data.current?.studentId as string | undefined;
+    const toSeat = String(over.id);
+
+    if (!fromSeat || !studentId) return;
+    if (fromSeat === toSeat) return;
+
+    const targetHasStudent = seating[toSeat] !== null;
+
+    if (targetHasStudent) {
+      swapSeats(fromSeat, toSeat);
+    } else {
+      moveToEmpty(fromSeat, toSeat, studentId);
+    }
+  }
 
   return (
-    <div className="space-y-4">
-      {/* HEADER ROW: title + assignment buttons + rules dropdown */}
-      <div className="flex items-center gap-3 flex-wrap relative">
-        <h2 className="text-lg font-semibold">{periodLabel}</h2>
+    <div className="mx-auto max-w-[1400px] px-6 py-6">
+      <h2 className="text-2xl font-semibold mb-4">{title}</h2>
 
-        {/* Assignment toolbar moved up here */}
-        <div className="flex items-center gap-2">
-          <AssignmentToolbar
-            onRandomize={randomize}
-            onSortAlpha={sortAlpha}
-            onClearAll={clearAll}
-          />
-          <ExportButtons targetSelector="#period-canvas" fileBase={`seating-${periodId}`} />
-        </div>
-
-        {/* Rules dropdown on same line, aligned right */}
-        <div className="ml-auto relative" ref={rulesRef}>
-          <button
-            type="button"
-            className="px-2 py-1 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50"
-            onClick={() => setOpenRules(v => !v)}
-            aria-expanded={openRules}
-            aria-haspopup="dialog"
-            title={openRules ? 'Collapse rules' : 'Expand rules'}
-          >
-            Rules {openRules ? '▴' : '▾'}
-          </button>
-
-          {openRules && (
-            <div
-              className="absolute right-0 mt-2 z-20 w-[min(720px,90vw)] rounded-lg border border-slate-200 bg-white shadow-lg p-3"
-              role="dialog"
-              aria-label="Rules"
-            >
-              <RulesManager
-                students={students as StudentMeta[]}
-                together={rules.together}
-                apart={rules.apart}
-                onAdd={addRule}
-                onRemove={removeRule}
-              />
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Canvas */}
-      <div
-        id="period-canvas"
-        ref={canvasRef}
-        className="relative mx-auto border border-slate-200 rounded-lg bg-slate-50 overflow-hidden"
-        style={{ width: outerW, height: outerH }}
+      <DndContext
+        sensors={sensors}
+        onDragStart={(e) => {
+          const s = e.active.data.current?.student as Student | undefined;
+          if (s) setActiveStudent(s);
+        }}
+        onDragEnd={onDragEnd}
+        modifiers={[restrictToParentElement, restrictToWindowEdges]}
       >
-        <div className="absolute left-0 right-0 top-2 text-center text-xs text-slate-500">
-          Front of classroom
-        </div>
-
-        {/* Fixtures layer (non-interactive) */}
         <div
-          className="absolute top-0 pointer-events-none"
-          style={{ left: leftPad, width: gridW, height: outerH }}
+          className="relative rounded-2xl bg-white shadow p-4 border border-slate-200"
         >
-          {template.fixtures?.map((f) => (
-            <Fixture
-              key={f.id}
-              id={f.id}
-              type={f.type as any}
-              x={f.x}
-              y={f.y}
-              onMove={() => {}}
-              onRemove={() => {}}
-            />
-          ))}
+          <Grid seating={seating} getStudentAtSeat={getStudentAtSeat} />
         </div>
 
-        {/* Seats layer */}
-        <div className="absolute top-0" style={{ left: leftPad, width: gridW, height: outerH }}>
-          {template.desks.map(d => {
-            const seatId = d.id
-            const studentId = assignments[seatId] ?? null
-            const s = studentId ? students.find(x => x.id === studentId) || null : null
-            const name = s ? getDisplayName(s) : null
-            return (
-              <PeriodSeat
-                key={seatId}
-                periodId={periodId}
-                seatId={seatId}
-                x={d.x}
-                y={d.y}
-                w={w}
-                h={h}
-                tags={d.tags}
-                isExcluded={excluded.has(seatId)}
-                isSelected={selectedSeat === seatId}
-                studentId={studentId}
-                studentName={name}
-                onClick={() => onSeatClick(seatId)}
-                onToggleExclude={() => toggleExcluded(seatId)}
-                onUnassign={() => unassignSeat(seatId)}
-                onDropStudent={(sid) => onDropStudent(seatId, sid)}
-                onDragStudentStart={() => {}}
-              />
-            )
-          })}
-        </div>
+        <DragOverlay dropAnimation={{ duration: 150 }}>
+          {activeStudent ? <StudentCard student={activeStudent} dragging /> : null}
+        </DragOverlay>
+      </DndContext>
+
+      <UnseatedList
+        students={students}
+        seating={seating}
+        onPlace={(studentId, toSeat) => {
+          // Find current seat (if any), then move
+          const currentSeat = Object.keys(seating).find(k => seating[k] === studentId);
+          if (!currentSeat) {
+            setSeating(prev => {
+              const next = { ...prev };
+              next[toSeat] = studentId;
+              storage.set(STORAGE_KEY, next);
+              return next;
+            });
+          } else if (currentSeat !== toSeat) {
+            moveToEmpty(currentSeat, toSeat, studentId);
+          }
+        }}
+        />
+    </div>
+  );
+}
+
+/* ---------- Presentational + DnD pieces ---------- */
+
+import { useDraggable, useDroppable } from "@dnd-kit/core";
+
+function Grid({ seating, getStudentAtSeat }: {
+  seating: SeatingMap;
+  getStudentAtSeat: (seatId: string) => Student | null;
+}) {
+  return (
+    <div
+      className="grid gap-3"
+      style={{
+        gridTemplateColumns: `repeat(${COLS}, minmax(0, 1fr))`
+      }}
+    >
+      {seatIds().map(id => (
+        <Seat key={id} id={id}>
+          {(() => {
+            const s = getStudentAtSeat(id);
+            return s ? <DraggableStudent seatId={id} student={s} /> : <EmptySeatBadge />;
+          })()}
+        </Seat>
+      ))}
+    </div>
+  );
+}
+
+function Seat({ id, children }: { id: string; children: React.ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      className={`h-28 rounded-xl border flex items-center justify-center transition
+        ${isOver ? "border-blue-500 ring-2 ring-blue-200" : "border-slate-300"}
+        bg-slate-50`}
+      aria-label={`Seat ${id}`}
+    >
+      {children}
+    </div>
+  );
+}
+
+function EmptySeatBadge() {
+  return (
+    <div className="text-slate-400 text-sm select-none">Empty</div>
+  );
+}
+
+function DraggableStudent({ student, seatId }: { student: Student; seatId: string }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: `student:${student.id}`,
+    data: { studentId: student.id, seatId, student },
+  });
+
+  const style: React.CSSProperties = transform
+    ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
+    : undefined;
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      <StudentCard student={student} dragging={isDragging} />
+    </div>
+  );
+}
+
+function StudentCard({ student, dragging }: { student: Student; dragging?: boolean }) {
+  return (
+    <div
+      className={`w-[150px] h-[72px] rounded-xl border bg-white shadow-sm px-3 py-2 flex items-center gap-3
+        ${dragging ? "opacity-90 scale-[1.02]" : "hover:shadow"} transition`}
+      >
+      {student.photo ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={student.photo} alt={student.name} className="w-10 h-10 rounded-full object-cover" />
+      ) : (
+        <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 text-sm">{initials(student.name)}</div>
+      )}
+      <div className="min-w-0">
+        <div className="text-sm font-medium truncate">{student.name}</div>
+        <div className="text-xs text-slate-500">Drag to move</div>
       </div>
     </div>
-  )
+  );
+}
+
+function initials(name: string) {
+  return name.split(" ").map(s => s[0]).slice(0, 2).join("").toUpperCase();
+}
+
+/** Optional: a panel that shows anyone not currently seated and lets you click-place them into an empty seat */
+function UnseatedList({
+  students,
+  seating,
+  onPlace,
+}: {
+  students: Student[];
+  seating: SeatingMap;
+  onPlace: (studentId: string, toSeat: string) => void;
+}) {
+  const seated = new Set(Object.values(seating).filter(Boolean) as string[]);
+  const unseated = students.filter(s => !seated.has(s.id));
+
+  if (unseated.length === 0) return null;
+
+  const firstEmpty = Object.keys(seating).find(k => seating[k] === null) ?? null;
+
+  return (
+    <div className="mt-6">
+      <h3 className="text-sm font-semibold text-slate-700 mb-2">Unseated</h3>
+      <div className="flex flex-wrap gap-3">
+        {unseated.map(s => (
+          <button
+            key={s.id}
+            onClick={() => {
+              if (!firstEmpty) return;
+              onPlace(s.id, firstEmpty);
+            }}
+            className="rounded-xl border bg-white hover:bg-slate-50 px-3 py-2 flex items-center gap-2 text-left shadow-sm"
+            title="Click to place in first available seat"
+          >
+            <span className="inline-flex w-7 h-7 rounded-full bg-slate-200 items-center justify-center text-xs text-slate-600">
+              {initials(s.name)}
+            </span>
+            <span className="text-sm">{s.name}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
