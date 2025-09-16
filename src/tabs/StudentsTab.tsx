@@ -4,6 +4,7 @@ import type { StudentsConfig, StudentMeta } from '../lib/types'
 import { storage } from '../lib/storage'
 import { syncStudentsFromManifests } from '../lib/data'
 import { getDisplayName } from '../lib/utils'
+import { broadcastStudentsUpdated } from '../lib/broadcast'
 
 const ALLOWED_TAGS = ['front row', 'back row', 'near TB'] as const
 type AllowedTag = typeof ALLOWED_TAGS[number]
@@ -17,16 +18,27 @@ export default function StudentsTab() {
     p1: true, p3: true, p4: true, p5: true, p6: true,
   })
 
-  // listen for external updates (e.g., sync from manifests)
+  // listen for external updates (e.g., sync from manifests) and cross-tab storage bumps
   useEffect(() => {
     const onUpdate = () => setCfg(storage.getStudents())
-    window.addEventListener('students:updated', onUpdate)
-    return () => window.removeEventListener('students:updated', onUpdate)
+    const onStorage = (e: StorageEvent) => {
+      if (!e.key || !e.key.startsWith('seating.')) return
+      setCfg(storage.getStudents())
+    }
+    // use unified event name that the rest of the app listens for
+    window.addEventListener('seating:students-updated', onUpdate as EventListener)
+    window.addEventListener('storage', onStorage)
+    return () => {
+      window.removeEventListener('seating:students-updated', onUpdate as EventListener)
+      window.removeEventListener('storage', onStorage)
+    }
   }, [])
 
   async function handleSync() {
     await syncStudentsFromManifests()
     setCfg(storage.getStudents())
+    // notify other tabs/pages and period canvases
+    broadcastStudentsUpdated()
   }
 
   function updateStudent(period: PeriodId, id: string, patch: Partial<StudentMeta>) {
@@ -44,6 +56,8 @@ export default function StudentsTab() {
     list[idx] = { ...curr, ...patch, ...(displayName !== undefined ? { displayName } : { displayName: undefined }) }
     storage.setStudents(next)
     setCfg(next)
+    // broadcast after every write so other views refresh
+    broadcastStudentsUpdated()
   }
 
   const periods = useMemo(() => PERIODS, [])
