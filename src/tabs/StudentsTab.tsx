@@ -18,6 +18,11 @@ export default function StudentsTab() {
     p1: true, p3: true, p4: true, p5: true, p6: true,
   })
 
+  // --- Sync progress UI state ---
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [syncPct, setSyncPct] = useState(0)
+  const [syncLabel, setSyncLabel] = useState<string>('')
+
   // listen for external updates (e.g., sync from manifests) and cross-tab storage bumps
   useEffect(() => {
     const onUpdate = () => setCfg(storage.getStudents())
@@ -35,10 +40,29 @@ export default function StudentsTab() {
   }, [])
 
   async function handleSync() {
-    await syncStudentsFromManifests()
-    setCfg(storage.getStudents())
-    // notify other tabs/pages and period canvases
-    broadcastStudentsUpdated()
+    try {
+      setIsSyncing(true)
+      setSyncPct(1)
+      setSyncLabel('Starting…')
+      await syncStudentsFromManifests((pct, label) => {
+        setSyncPct(Math.max(1, Math.min(100, Math.round(pct))))
+        setSyncLabel(label ?? '')
+      })
+      setCfg(storage.getStudents())
+      // notify other tabs/pages and period canvases
+      broadcastStudentsUpdated()
+      setSyncPct(100)
+      setSyncLabel('Done')
+    } catch {
+      // leave any errors to existing console warnings inside sync
+    } finally {
+      // small delay so the bar can reach 100% visibly
+      setTimeout(() => {
+        setIsSyncing(false)
+        setSyncPct(0)
+        setSyncLabel('')
+      }, 350)
+    }
   }
 
   function updateStudent(period: PeriodId, id: string, patch: Partial<StudentMeta>) {
@@ -151,11 +175,38 @@ export default function StudentsTab() {
       <div className="flex items-center gap-2">
         <h2 className="text-lg font-semibold">Students (Global)</h2>
         <button
-          className="ml-2 px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50"
+          className={
+            'ml-2 px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50 ' +
+            (isSyncing ? 'opacity-60 cursor-not-allowed' : '')
+          }
           onClick={handleSync}
+          disabled={isSyncing}
+          aria-busy={isSyncing}
+          aria-live="polite"
         >
-          Sync from manifests
+          {isSyncing ? 'Syncing…' : 'Sync from manifests'}
         </button>
+
+        {/* Progress bar + spinner */}
+        {isSyncing && (
+          <div className="flex items-center gap-2">
+            <div className="w-40 h-2 rounded bg-slate-200 overflow-hidden" aria-label="Sync progress">
+              <div
+                className="h-2 bg-slate-700 transition-all"
+                style={{ width: `${Math.max(2, Math.min(100, syncPct))}%` }}
+              />
+            </div>
+            <div className="text-xs text-slate-600 min-w-[6rem]">{syncPct}% {syncLabel}</div>
+            <svg
+              className="animate-spin h-4 w-4 text-slate-600"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none" viewBox="0 0 24 24" role="img" aria-hidden="true"
+            >
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4A4 4 0 008 12H4z"/>
+            </svg>
+          </div>
+        )}
 
         <input
           ref={fileRef}
@@ -165,16 +216,24 @@ export default function StudentsTab() {
           onChange={onImportRoster}
         />
         <button
-          className="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50"
+          className={
+            'px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50 ' +
+            (isSyncing ? 'opacity-60 cursor-not-allowed' : '')
+          }
           onClick={onExportRoster}
           title="Download the current students roster as JSON"
+          disabled={isSyncing}
         >
           Export roster JSON
         </button>
         <button
-          className="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50"
+          className={
+            'px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50 ' +
+            (isSyncing ? 'opacity-60 cursor-not-allowed' : '')
+          }
           onClick={() => fileRef.current?.click()}
           title="Import a students roster JSON (replace or merge)"
+          disabled={isSyncing}
         >
           Import roster JSON
         </button>
@@ -184,6 +243,7 @@ export default function StudentsTab() {
             className="px-2 py-1 text-xs rounded-md border border-slate-300 bg-white hover:bg-slate-50"
             onClick={() => setAll(false)}
             title="Expand all periods"
+            disabled={isSyncing}
           >
             Expand all
           </button>
@@ -191,6 +251,7 @@ export default function StudentsTab() {
             className="px-2 py-1 text-xs rounded-md border border-slate-300 bg-white hover:bg-slate-50"
             onClick={() => setAll(true)}
             title="Collapse all periods"
+            disabled={isSyncing}
           >
             Collapse all
           </button>
@@ -199,6 +260,7 @@ export default function StudentsTab() {
             placeholder="Search by name..."
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
+            disabled={isSyncing}
           />
         </div>
       </div>
@@ -213,6 +275,7 @@ export default function StudentsTab() {
                 className="mr-2 text-slate-600 hover:text-slate-900"
                 onClick={() => setCollapsed(prev => ({ ...prev, [p]: !prev[p] }))}
                 title={isCollapsed ? 'Expand' : 'Collapse'}
+                disabled={isSyncing}
               >
                 {isCollapsed ? '▶' : '▼'}
               </button>
@@ -220,6 +283,7 @@ export default function StudentsTab() {
               <button
                 className="ml-auto text-xs text-slate-600 hover:text-slate-900"
                 onClick={() => setCollapsed(prev => ({ ...prev, [p]: !prev[p] }))}
+                disabled={isSyncing}
               >
                 {isCollapsed ? 'Expand' : 'Collapse'}
               </button>
