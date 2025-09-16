@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { PERIODS, type PeriodId } from '../lib/constants'
 import type { StudentsConfig, StudentMeta } from '../lib/types'
 import { storage } from '../lib/storage'
@@ -73,6 +73,79 @@ export default function StudentsTab() {
     setCollapsed({ p1: collapsedAll, p3: collapsedAll, p4: collapsedAll, p5: collapsedAll, p6: collapsedAll })
   }
 
+  // ----- Export / Import roster (backup/restore) -----
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  function coerceIncomingStudents(json: any): StudentsConfig {
+    const maybe = json?.periods ?? json
+    const result: StudentsConfig = { ...maybe }
+    for (const p of PERIODS) {
+      if (!Array.isArray(result[p])) result[p] = []
+    }
+    return result
+  }
+
+  function mergeStudents(existing: StudentsConfig, incoming: StudentsConfig): StudentsConfig {
+    const out: StudentsConfig = { ...existing }
+    for (const p of PERIODS) {
+      const byId = new Map<string, StudentMeta>()
+      for (const s of existing[p]) byId.set(s.id, { ...s })
+      for (const inc of incoming[p]) {
+        const prev = byId.get(inc.id)
+        if (prev) {
+          byId.set(inc.id, {
+            ...prev,
+            name: inc.name ?? prev.name,
+            displayName: inc.displayName ?? prev.displayName,
+            notes: inc.notes ?? prev.notes,
+            tags: Array.isArray(inc.tags) ? inc.tags.slice() : prev.tags,
+          })
+        } else {
+          byId.set(inc.id, { ...inc })
+        }
+      }
+      out[p] = Array.from(byId.values())
+    }
+    return out
+  }
+
+  async function onImportRoster(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const text = await file.text()
+      const json = JSON.parse(text)
+      const incoming = coerceIncomingStudents(json)
+      const replace = confirm('Replace ALL existing students with the imported file?\n\nClick "Cancel" to MERGE instead.')
+
+      const next = replace ? incoming : mergeStudents(storage.getStudents(), incoming)
+      storage.setStudents(next)
+      setCfg(next)
+      broadcastStudentsUpdated()
+      alert(replace ? 'Roster replaced from file.' : 'Roster merged from file.')
+    } catch (err) {
+      alert(`Import failed: ${(err as Error).message}`)
+    } finally {
+      e.currentTarget.value = ''
+    }
+  }
+
+  function onExportRoster() {
+    const data = storage.getStudents()
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      periods: data,
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'students-roster.json'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
@@ -82,6 +155,28 @@ export default function StudentsTab() {
           onClick={handleSync}
         >
           Sync from manifests
+        </button>
+
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/json"
+          className="hidden"
+          onChange={onImportRoster}
+        />
+        <button
+          className="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50"
+          onClick={onExportRoster}
+          title="Download the current students roster as JSON"
+        >
+          Export roster JSON
+        </button>
+        <button
+          className="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50"
+          onClick={() => fileRef.current?.click()}
+          title="Import a students roster JSON (replace or merge)"
+        >
+          Import roster JSON
         </button>
 
         <div className="ml-auto flex items-center gap-2">
