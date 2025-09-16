@@ -9,8 +9,19 @@ import { broadcastStudentsUpdated } from '../lib/broadcast'
 const ALLOWED_TAGS = ['front row', 'back row', 'near TB'] as const
 type AllowedTag = typeof ALLOWED_TAGS[number]
 
+// ✅ Ensure the object always has arrays for all periods
+function ensureStudentsShape(input: any): StudentsConfig {
+  const base: StudentsConfig = { p1: [], p3: [], p4: [], p5: [], p6: [] }
+  if (!input || typeof input !== 'object') return base
+  const out: StudentsConfig = { ...base, ...input }
+  for (const p of PERIODS) {
+    if (!Array.isArray(out[p])) out[p] = []
+  }
+  return out
+}
+
 export default function StudentsTab() {
-  const [cfg, setCfg] = useState<StudentsConfig>(() => storage.getStudents())
+  const [cfg, setCfg] = useState<StudentsConfig>(() => ensureStudentsShape(storage.getStudents()))
   const [filter, setFilter] = useState('')
 
   // collapsed by default for all periods
@@ -25,10 +36,10 @@ export default function StudentsTab() {
 
   // listen for external updates (e.g., sync from manifests) and cross-tab storage bumps
   useEffect(() => {
-    const onUpdate = () => setCfg(storage.getStudents())
+    const onUpdate = () => setCfg(ensureStudentsShape(storage.getStudents()))
     const onStorage = (e: StorageEvent) => {
       if (!e.key || !e.key.startsWith('seating.')) return
-      setCfg(storage.getStudents())
+      setCfg(ensureStudentsShape(storage.getStudents()))
     }
     // use unified event name that the rest of the app listens for
     window.addEventListener('seating:students-updated', onUpdate as EventListener)
@@ -48,7 +59,7 @@ export default function StudentsTab() {
         setSyncPct(Math.max(1, Math.min(100, Math.round(pct))))
         setSyncLabel(label ?? '')
       })
-      setCfg(storage.getStudents())
+      setCfg(ensureStudentsShape(storage.getStudents()))
       // notify other tabs/pages and period canvases
       broadcastStudentsUpdated()
       setSyncPct(100)
@@ -79,7 +90,7 @@ export default function StudentsTab() {
     }
     list[idx] = { ...curr, ...patch, ...(displayName !== undefined ? { displayName } : { displayName: undefined }) }
     storage.setStudents(next)
-    setCfg(next)
+    setCfg(ensureStudentsShape(next))
     // broadcast after every write so other views refresh
     broadcastStudentsUpdated()
   }
@@ -142,9 +153,9 @@ export default function StudentsTab() {
       const incoming = coerceIncomingStudents(json)
       const replace = confirm('Replace ALL existing students with the imported file?\n\nClick "Cancel" to MERGE instead.')
 
-      const next = replace ? incoming : mergeStudents(storage.getStudents(), incoming)
+      const next = replace ? incoming : mergeStudents(ensureStudentsShape(storage.getStudents()), incoming)
       storage.setStudents(next)
-      setCfg(next)
+      setCfg(ensureStudentsShape(next))
       broadcastStudentsUpdated()
       alert(replace ? 'Roster replaced from file.' : 'Roster merged from file.')
     } catch (err) {
@@ -155,7 +166,7 @@ export default function StudentsTab() {
   }
 
   function onExportRoster() {
-    const data = storage.getStudents()
+    const data = ensureStudentsShape(storage.getStudents())
     const payload = {
       version: 1,
       exportedAt: new Date().toISOString(),
@@ -266,8 +277,10 @@ export default function StudentsTab() {
       </div>
 
       {periods.map((p) => {
-        const list = cfg[p].slice().sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b))).filter(matches)
+        const raw = Array.isArray(cfg[p]) ? cfg[p] : []                           // ✅ guard
+        const list = raw.slice().sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b))).filter(matches)
         const isCollapsed = collapsed[p]
+        const totalCount = raw.length                                             // keep header count semantics
         return (
           <div key={p} className="rounded-lg border border-slate-200 bg-white">
             <div className="px-3 py-2 border-b border-slate-200 text-sm font-medium flex items-center">
@@ -279,7 +292,7 @@ export default function StudentsTab() {
               >
                 {isCollapsed ? '▶' : '▼'}
               </button>
-              <span className="mr-2">{p.toUpperCase()} — {cfg[p].length} students</span>
+              <span className="mr-2">{p.toUpperCase()} — {totalCount} students</span>
               <button
                 className="ml-auto text-xs text-slate-600 hover:text-slate-900"
                 onClick={() => setCollapsed(prev => ({ ...prev, [p]: !prev[p] }))}
