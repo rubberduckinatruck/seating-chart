@@ -4,6 +4,8 @@ import type { StudentsConfig, StudentMeta, PeriodAssignments } from './types'
 import { storage } from './storage'
 import { broadcastStudentsUpdated } from './broadcast'
 
+type ProgressCb = (pct: number, label?: string) => void
+
 // Join BASE_URL + path without using new URL on a relative base
 function withBase(p: string) {
   const base = (import.meta.env && (import.meta.env as any).BASE_URL) || '/'
@@ -60,11 +62,20 @@ async function fetchTopIndexVersion(): Promise<string | undefined> {
   }
 }
 
-export async function syncStudentsFromManifests(): Promise<StudentsConfig> {
+export async function syncStudentsFromManifests(onProgress?: ProgressCb): Promise<StudentsConfig> {
   const local = storage.getStudents()
   const merged: StudentsConfig = { p1: [], p3: [], p4: [], p5: [], p6: [] }
 
-  for (const period of PERIODS) {
+  const totalSteps = PERIODS.length + 2 // per-period merges + cleanup/broadcast
+  const step = (i: number, label?: string) => {
+    const pct = Math.min(100, Math.max(1, Math.round(((i) / totalSteps) * 100)))
+    onProgress?.(pct, label)
+  }
+
+  step(0, 'Fetching')
+
+  for (let i = 0; i < PERIODS.length; i++) {
+    const period = PERIODS[i]
     try {
       const remote = await fetchManifest(period)
       const mapLocal = new Map(local[period].map((s) => [s.id, s]))
@@ -93,6 +104,8 @@ export async function syncStudentsFromManifests(): Promise<StudentsConfig> {
       // If fetch fails, keep existing local data for this period
       merged[period] = local[period]
     }
+
+    step(i + 1, `Merged ${period.toUpperCase()}`)
   }
 
   // Persist merged roster
@@ -129,6 +142,8 @@ export async function syncStudentsFromManifests(): Promise<StudentsConfig> {
     console.warn('sync: failed to auto-unassign removed students:', e)
   }
 
+  step(PERIODS.length + 1, 'Finalizing')
+
   // Remember manifest version if available (from top-level aggregator)
   try {
     const ver = await fetchTopIndexVersion()
@@ -146,5 +161,6 @@ export async function syncStudentsFromManifests(): Promise<StudentsConfig> {
     // ignore
   }
 
+  onProgress?.(100, 'Done')
   return merged
 }
