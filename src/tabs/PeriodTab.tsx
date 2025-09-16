@@ -17,65 +17,53 @@ import ExportButtons from '../components/ExportButtons'
 import Fixture from '../components/Fixture'
 
 export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
-  // Force a refresh when broadcast events or storage updates happen
+  // force refresh when fixtures/students are broadcast-updated
   const [, setRefreshTick] = useState(0)
-
-  // --- Broadcast listeners (fixtures/students updated) + storage sync across tabs ---
   useEffect(() => {
-    function bump() {
-      // Trigger re-render so we re-read storage (template, students, etc.)
-      setRefreshTick(t => t + 1)
-    }
-    function onFixturesUpdated() { bump() }
-    function onStudentsUpdated() { bump() }
+    function bump() { setRefreshTick(t => t + 1) }
+    function onFx() { bump() }
+    function onStudents() { bump() }
     function onStorage(e: StorageEvent) {
-      // react only to our app's keys (prefix 'seating.')
       if (!e.key || !e.key.startsWith('seating.')) return
       bump()
     }
-
-    window.addEventListener('seating:fixtures-updated', onFixturesUpdated as EventListener)
-    window.addEventListener('seating:students-updated', onStudentsUpdated as EventListener)
+    window.addEventListener('seating:fixtures-updated', onFx as EventListener)
+    window.addEventListener('seating:students-updated', onStudents as EventListener)
     window.addEventListener('storage', onStorage)
-
     return () => {
-      window.removeEventListener('seating:fixtures-updated', onFixturesUpdated as EventListener)
-      window.removeEventListener('seating:students-updated', onStudentsUpdated as EventListener)
+      window.removeEventListener('seating:fixtures-updated', onFx as EventListener)
+      window.removeEventListener('seating:students-updated', onStudents as EventListener)
       window.removeEventListener('storage', onStorage)
     }
   }, [])
 
-  // Snapshot config/state from storage on each render (will update when refreshTick bumps)
+  // snapshot config/state from storage
   const template = storage.getTemplate()
   const studentsCfg = storage.getStudents()
   const rulesCfg = storage.getRules()
   const excludedCfg = storage.getExcluded()
   const assignCfg = storage.getAssignments()
 
-  // ----- helpers that depend on current template -----
+  // helpers based on current template
   function blankAssignments(): Record<string, string | null> {
     const next: Record<string, string | null> = {}
     for (const d of template.desks) next[d.id] = null
     return next
   }
-
   function buildAssignmentsForPeriod(pid: PeriodId): Record<string, string | null> {
     const saved = assignCfg[pid] || {}
-    // Ensure all seats exist with null by default, then overlay saved
     return { ...blankAssignments(), ...saved }
   }
-
   function buildExcludedForPeriod(pid: PeriodId): Set<string> {
     const savedArr = excludedCfg[pid] || []
     return new Set(savedArr)
   }
-
   function buildRulesForPeriod(pid: PeriodId): { together: [string, string][]; apart: [string, string][] } {
     const saved = rulesCfg[pid] || { together: [], apart: [] }
     return { together: saved.together.slice(), apart: saved.apart.slice() }
   }
 
-  // Local state per period (initialized from current storage snapshot)
+  // local state per period
   const [assignments, setAssignments] = useState<Record<string, string | null>>(
     () => buildAssignmentsForPeriod(periodId)
   )
@@ -86,9 +74,9 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
     () => buildRulesForPeriod(periodId)
   )
   const [selectedSeat, setSelectedSeat] = useState<string | null>(null)
-  const [conflictNotes, setConflictNotes] = useState<string[]>([]) // kept for future UI
+  const [conflictNotes, setConflictNotes] = useState<string[]>([])
 
-  // Re-hydrate period-local state whenever periodId changes
+  // re-hydrate when period changes
   useEffect(() => {
     setAssignments(buildAssignmentsForPeriod(periodId))
     setExcluded(buildExcludedForPeriod(periodId))
@@ -97,7 +85,6 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
     setConflictNotes([])
   }, [periodId])
 
-  // Students list for this period (will refresh when refreshTick bumps, since we re-read studentsCfg above)
   const students = useMemo(
     () =>
       studentsCfg[periodId]
@@ -108,7 +95,7 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
 
   const canvasRef = useRef<HTMLDivElement | null>(null)
 
-  // ----- persist helpers -----
+  // persist helpers
   function persistAssignments(next: Record<string, string | null>) {
     const all: PeriodAssignments = storage.getAssignments()
     all[periodId] = next
@@ -125,13 +112,12 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
     storage.setRules(all)
   }
 
-  // ----- toolbar actions -----
+  // toolbar actions
   function clearAll() {
     const next = blankAssignments()
     setAssignments(next)
     persistAssignments(next)
   }
-
   function randomize() {
     const ctx: AssignContext = { template, students, excluded, rules }
     const res = assignSeating(ctx, 'random')
@@ -141,7 +127,6 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
     persistAssignments(next)
     setConflictNotes(res.conflicts)
   }
-
   function sortAlpha() {
     const ctx: AssignContext = { template, students, excluded, rules }
     const res = assignSeating(ctx, 'alpha')
@@ -152,16 +137,10 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
     setConflictNotes(res.conflicts)
   }
 
-  // ----- seat interactions -----
+  // seat interactions
   function onSeatClick(seatId: string) {
-    if (selectedSeat === null) {
-      setSelectedSeat(seatId)
-      return
-    }
-    if (selectedSeat === seatId) {
-      setSelectedSeat(null)
-      return
-    }
+    if (selectedSeat === null) { setSelectedSeat(seatId); return }
+    if (selectedSeat === seatId) { setSelectedSeat(null); return }
     const a = assignments[selectedSeat] ?? null
     const b = assignments[seatId] ?? null
     const next = { ...assignments, [selectedSeat]: b, [seatId]: a }
@@ -169,7 +148,6 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
     persistAssignments(next)
     setSelectedSeat(null)
   }
-
   function toggleExcluded(seatId: string) {
     const next = new Set(excluded)
     if (next.has(seatId)) next.delete(seatId)
@@ -177,14 +155,11 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
     setExcluded(next)
     persistExcluded(next)
   }
-
   function unassignSeat(seatId: string) {
     const next = { ...assignments, [seatId]: null }
     setAssignments(next)
     persistAssignments(next)
   }
-
-  // drag from student list onto a seat
   function onDropStudent(toSeatId: string, studentId: string) {
     const fromSeatId = Object.keys(assignments).find(k => assignments[k] === studentId) || null
     const targetStudent = assignments[toSeatId] ?? null
@@ -194,11 +169,8 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
     setAssignments(next)
     persistAssignments(next)
   }
-  function onDragStudentStart(_studentId: string) {
-    /* no-op for now */
-  }
 
-  // ----- rules helpers (fixes "addRule is not defined") -----
+  // rules helpers
   function addRule(kind: 'together' | 'apart', pair: [string, string]) {
     const next =
       kind === 'together'
@@ -207,7 +179,6 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
     setRules(next)
     persistRules(next)
   }
-
   function removeRule(kind: 'together' | 'apart', idx: number) {
     const next =
       kind === 'together'
@@ -217,71 +188,70 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
     persistRules(next)
   }
 
-  // ----- canvas sizing / centering -----
+  // canvas sizing / centering
   const w = template.spacing.cardW
   const h = template.spacing.cardH
   const gridW = 3 * (2 * w + template.spacing.withinPair + template.spacing.betweenPairs)
   const gridH = 6 * (h + template.spacing.rowGap) + 100
-  const outerW = Math.max(900, gridW + 200) // extra usable margin left/right
+  const outerW = Math.max(900, gridW + 200)
   const outerH = gridH
   const leftPad = Math.floor((outerW - gridW) / 2)
 
-  // header label
   const periodLabel = `Period ${periodId.slice(1)}`
 
-  // collapsible states (default collapsed)
-  const [openTools, setOpenTools] = useState(false)
+  // Rules dropdown on header row
   const [openRules, setOpenRules] = useState(false)
+  const rulesRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') setOpenRules(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (!openRules) return
+      const n = e.target as Node
+      if (rulesRef.current && !rulesRef.current.contains(n)) setOpenRules(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [openRules])
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold">{periodLabel}</h2>
+      {/* HEADER ROW: title + assignment buttons + rules dropdown */}
+      <div className="flex items-center gap-3 flex-wrap relative">
+        <h2 className="text-lg font-semibold">{periodLabel}</h2>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {/* Assignment Tools (collapsible) */}
-        <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
-          <div className="flex items-center justify-between">
-            <div className="font-medium">Assignment Tools</div>
-            <button
-              type="button"
-              className="px-2 py-1 rounded-md border border-slate-300 bg-white hover:bg-slate-50"
-              onClick={() => setOpenTools(v => !v)}
-              aria-expanded={openTools}
-            >
-              {openTools ? 'Collapse' : 'Expand'}
-            </button>
-          </div>
-          {openTools && (
-            <>
-              <div className="mt-2">
-                <AssignmentToolbar
-                  onRandomize={randomize}
-                  onSortAlpha={sortAlpha}
-                  onClearAll={clearAll}
-                />
-              </div>
-              <div className="mt-3">
-                <ExportButtons targetSelector="#period-canvas" fileBase={`seating-${periodId}`} />
-              </div>
-            </>
-          )}
+        {/* Assignment toolbar moved up here */}
+        <div className="flex items-center gap-2">
+          <AssignmentToolbar
+            onRandomize={randomize}
+            onSortAlpha={sortAlpha}
+            onClearAll={clearAll}
+          />
+          <ExportButtons targetSelector="#period-canvas" fileBase={`seating-${periodId}`} />
         </div>
 
-        {/* Rules (collapsible) */}
-        <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
-          <div className="flex items-center justify-between">
-            <div className="font-medium">Rules</div>
-            <button
-              type="button"
-              className="px-2 py-1 rounded-md border border-slate-300 bg-white hover:bg-slate-50"
-              onClick={() => setOpenRules(v => !v)}
-              aria-expanded={openRules}
-            >
-              {openRules ? 'Collapse' : 'Expand'}
-            </button>
-          </div>
+        {/* Rules dropdown on same line, aligned right */}
+        <div className="ml-auto relative" ref={rulesRef}>
+          <button
+            type="button"
+            className="px-2 py-1 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50"
+            onClick={() => setOpenRules(v => !v)}
+            aria-expanded={openRules}
+            aria-haspopup="dialog"
+            title={openRules ? 'Collapse rules' : 'Expand rules'}
+          >
+            Rules {openRules ? '▴' : '▾'}
+          </button>
+
           {openRules && (
-            <div className="mt-2">
+            <div
+              className="absolute right-0 mt-2 z-20 w-[min(720px,90vw)] rounded-lg border border-slate-200 bg-white shadow-lg p-3"
+              role="dialog"
+              aria-label="Rules"
+            >
               <RulesManager
                 students={students as StudentMeta[]}
                 together={rules.together}
@@ -294,7 +264,7 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
         </div>
       </div>
 
-      {/* Outer canvas centered, inner layer offsets the grid so margins are usable */}
+      {/* Canvas */}
       <div
         id="period-canvas"
         ref={canvasRef}
@@ -305,7 +275,7 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
           Front of classroom
         </div>
 
-        {/* Fixtures layer (non-interactive; mirrors template fixtures) */}
+        {/* Fixtures layer (non-interactive) */}
         <div
           className="absolute top-0 pointer-events-none"
           style={{ left: leftPad, width: gridW, height: outerH }}
@@ -323,6 +293,7 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
           ))}
         </div>
 
+        {/* Seats layer */}
         <div className="absolute top-0" style={{ left: leftPad, width: gridW, height: outerH }}>
           {template.desks.map(d => {
             const seatId = d.id
