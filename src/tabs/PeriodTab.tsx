@@ -1,309 +1,414 @@
-// src/tabs/PeriodTab.tsx
-import { useEffect, useMemo, useState } from "react";
-import { DndContext, DragEndEvent, DragOverlay, useSensor, useSensors, PointerSensor, KeyboardSensor } from "@dnd-kit/core";
-import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
-import { restrictToParentElement, restrictToWindowEdges } from "@dnd-kit/modifiers";
-import { storage } from "../lib/storage";
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { PERIODS, type PeriodId } from '../lib/constants'
+import type { StudentsConfig, StudentMeta } from '../lib/types'
+import { storage } from '../lib/storage'
+import { syncStudentsFromManifests } from '../lib/data'
+import { getDisplayName } from '../lib/utils'
+import { broadcastStudentsUpdated } from '../lib/broadcast'
 
-type Student = {
-  id: string;
-  name: string;
-  photo?: string;
-};
+const ALLOWED_TAGS = ['front row', 'back row', 'near TB'] as const
+type AllowedTag = typeof ALLOWED_TAGS[number]
 
-type SeatingMap = Record<string, string | null>; // seatId -> studentId|null
-
-// Configure your grid here
-const ROWS = 6;
-const COLS = 6;
-
-// Build seat ids like "r0c0", "r0c1", ...
-function seatId(r: number, c: number) {
-  return `r${r}c${c}`;
+// ✅ Ensure the object always has arrays for all periods
+function ensureStudentsShape(input: any): StudentsConfig {
+  const base: StudentsConfig = { p1: [], p3: [], p4: [], p5: [], p6: [] }
+  if (!input || typeof input !== 'object') return base
+  const out: StudentsConfig = { ...base, ...input }
+  for (const p of PERIODS) {
+    if (!Array.isArray(out[p])) out[p] = []
+  }
+  return out
 }
 
-function seatIds() {
-  const ids: string[] = [];
-  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) ids.push(seatId(r, c));
-  return ids;
-}
+export default function StudentsTab() {
+  const [cfg, setCfg] = useState<StudentsConfig>(() => ensureStudentsShape(storage.getStudents()))
+  const [filter, setFilter] = useState('')
 
-type PeriodTabProps = {
-  periodId: string;                // logical id for storage (e.g., "p1")
-  students: Student[];             // roster for this period
-  title?: string;
-};
+  // collapsed by default for all periods
+  const [collapsed, setCollapsed] = useState<Record<PeriodId, boolean>>({
+    p1: true, p3: true, p4: true, p5: true, p6: true,
+  })
 
-export default function PeriodTab({ periodId, students, title = "Seating" }: PeriodTabProps) {
-  const STORAGE_KEY = `period:${periodId}:seating`;
+  // --- Sync progress UI state ---
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [syncPct, setSyncPct] = useState(0)
+  const [syncLabel, setSyncLabel] = useState<string>('')
 
-  // Build initial blank seating, then hydrate from storage
-  const blankSeating: SeatingMap = useMemo(() => {
-    const base: SeatingMap = {};
-    for (const id of seatIds()) base[id] = null;
-    return base;
-  }, []);
-
-  const [seating, setSeating] = useState<SeatingMap>(blankSeating);
-  const [activeStudent, setActiveStudent] = useState<Student | null>(null);
-
-  // For quick demo, auto-place any unseated students into first open seats
-  // (If you already assign seats elsewhere, you can remove this bit)
+  // listen for external updates (e.g., sync from manifests) and cross-tab storage bumps
   useEffect(() => {
-    const saved = storage.get<SeatingMap>(STORAGE_KEY);
-    if (saved) {
-      setSeating(saved);
-      return;
+    const onUpdate = () => setCfg(ensureStudentsShape(storage.getStudents()))
+    const onStorage = (e: StorageEvent) => {
+      if (!e.key || !e.key.startsWith('seating.')) return
+      setCfg(ensureStudentsShape(storage.getStudents()))
     }
-    const next = { ...blankSeating };
-    const unfilled = seatIds();
-    let idx = 0;
-    for (const s of students) {
-      // skip if already seated (shouldn’t happen on first run)
-      if (Object.values(next).includes(s.id)) continue;
-      // find next open
-      while (idx < unfilled.length && next[unfilled[idx]] !== null) idx++;
-      if (idx < unfilled.length) next[unfilled[idx]] = s.id;
+    // use unified event name that the rest of the app listens for
+    window.addEventListener('seating:students-updated', onUpdate as EventListener)
+    window.addEventListener('storage', onStorage)
+    return () => {
+      window.removeEventListener('seating:students-updated', onUpdate as EventListener)
+      window.removeEventListener('storage', onStorage)
     }
-    setSeating(next);
-    storage.set(STORAGE_KEY, next);
-  }, [STORAGE_KEY, blankSeating, students]);
+  }, [])
 
-  // Build lookup for convenience
-  const byId = useMemo(() => {
-    const m = new Map<string, Student>();
-    for (const s of students) m.set(s.id, s);
-    return m;
-  }, [students]);
-
-  // DnD sensors
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  );
-
-  function getStudentAtSeat(id: string): Student | null {
-    const sid = seating[id];
-    return sid ? byId.get(sid) ?? null : null;
+  async function handleSync() {
+    try {
+      setIsSyncing(true)
+      setSyncPct(1)
+      setSyncLabel('Starting…')
+      await syncStudentsFromManifests((pct, label) => {
+        setSyncPct(Math.max(1, Math.min(100, Math.round(pct))))
+        setSyncLabel(label ?? '')
+      })
+      setCfg(ensureStudentsShape(storage.getStudents()))
+      // notify other tabs/pages and period canvases
+      broadcastStudentsUpdated()
+      setSyncPct(100)
+      setSyncLabel('Done')
+    } catch {
+      // leave any errors to existing console warnings inside sync
+    } finally {
+      // small delay so the bar can reach 100% visibly
+      setTimeout(() => {
+        setIsSyncing(false)
+        setSyncPct(0)
+        setSyncLabel('')
+      }, 350)
     }
-  
-  function swapSeats(fromSeat: string, toSeat: string) {
-    setSeating(prev => {
-      const next = { ...prev };
-      const a = next[fromSeat];
-      const b = next[toSeat];
-      next[fromSeat] = b ?? null;
-      next[toSeat] = a ?? null;
-      storage.set(STORAGE_KEY, next);
-      return next;
-    });
   }
 
-  function moveToEmpty(fromSeat: string, toSeat: string, studentId: string) {
-    setSeating(prev => {
-      const next = { ...prev };
-      next[fromSeat] = null;
-      next[toSeat] = studentId;
-      storage.set(STORAGE_KEY, next);
-      return next;
-    });
+  function updateStudent(period: PeriodId, id: string, patch: Partial<StudentMeta>) {
+    const next: StudentsConfig = JSON.parse(JSON.stringify(cfg))
+    const list = next[period]
+    const idx = list.findIndex((s) => s.id === id)
+    if (idx === -1) return
+    const curr = list[idx]
+
+    // normalize displayName: if equal to file name, drop override
+    let displayName = patch.displayName
+    if (displayName !== undefined && displayName.trim() === curr.name.trim()) {
+      displayName = undefined
+    }
+    list[idx] = { ...curr, ...patch, ...(displayName !== undefined ? { displayName } : { displayName: undefined }) }
+    storage.setStudents(next)
+    setCfg(ensureStudentsShape(next))
+    // broadcast after every write so other views refresh
+    broadcastStudentsUpdated()
   }
 
-  function onDragEnd(evt: DragEndEvent) {
-    const { active, over } = evt;
-    setActiveStudent(null);
-    if (!over) return;
+  const periods = useMemo(() => PERIODS, [])
 
-    // metadata set on draggable
-    const fromSeat = active.data.current?.seatId as string | undefined;
-    const studentId = active.data.current?.studentId as string | undefined;
-    const toSeat = String(over.id);
+  const filterLc = filter.trim().toLowerCase()
+  const matches = (s: StudentMeta) =>
+    !filterLc ||
+    getDisplayName(s).toLowerCase().includes(filterLc) ||
+    s.name.toLowerCase().includes(filterLc) ||
+    s.id.toLowerCase().includes(filterLc)
 
-    if (!fromSeat || !studentId) return;
-    if (fromSeat === toSeat) return;
+  function setAll(collapsedAll: boolean) {
+    setCollapsed({ p1: collapsedAll, p3: collapsedAll, p4: collapsedAll, p5: collapsedAll, p6: collapsedAll })
+  }
 
-    const targetHasStudent = seating[toSeat] !== null;
+  // ----- Export / Import roster (backup/restore) -----
+  const fileRef = useRef<HTMLInputElement>(null)
 
-    if (targetHasStudent) {
-      swapSeats(fromSeat, toSeat);
-    } else {
-      moveToEmpty(fromSeat, toSeat, studentId);
+  function coerceIncomingStudents(json: any): StudentsConfig {
+    const maybe = json?.periods ?? json
+    const result: StudentsConfig = { ...maybe }
+    for (const p of PERIODS) {
+      if (!Array.isArray(result[p])) result[p] = []
     }
+    return result
+  }
+
+  function mergeStudents(existing: StudentsConfig, incoming: StudentsConfig): StudentsConfig {
+    const out: StudentsConfig = { ...existing }
+    for (const p of PERIODS) {
+      const byId = new Map<string, StudentMeta>()
+      for (const s of existing[p]) byId.set(s.id, { ...s })
+      for (const inc of incoming[p]) {
+        const prev = byId.get(inc.id)
+        if (prev) {
+          byId.set(inc.id, {
+            ...prev,
+            name: inc.name ?? prev.name,
+            displayName: inc.displayName ?? prev.displayName,
+            notes: inc.notes ?? prev.notes,
+            tags: Array.isArray(inc.tags) ? inc.tags.slice() : prev.tags,
+          })
+        } else {
+          byId.set(inc.id, { ...inc })
+        }
+      }
+      out[p] = Array.from(byId.values())
+    }
+    return out
+  }
+
+  async function onImportRoster(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const text = await file.text()
+      const json = JSON.parse(text)
+      const incoming = coerceIncomingStudents(json)
+      const replace = confirm('Replace ALL existing students with the imported file?\n\nClick "Cancel" to MERGE instead.')
+
+      const next = replace ? incoming : mergeStudents(ensureStudentsShape(storage.getStudents()), incoming)
+      storage.setStudents(next)
+      setCfg(ensureStudentsShape(next))
+      broadcastStudentsUpdated()
+      alert(replace ? 'Roster replaced from file.' : 'Roster merged from file.')
+    } catch (err) {
+      alert(`Import failed: ${(err as Error).message}`)
+    } finally {
+      e.currentTarget.value = ''
+    }
+  }
+
+  function onExportRoster() {
+    const data = ensureStudentsShape(storage.getStudents())
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      periods: data,
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'students-roster.json'
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   return (
-    <div className="mx-auto max-w-[1400px] px-6 py-6">
-      <h2 className="text-2xl font-semibold mb-4">{title}</h2>
-
-      <DndContext
-        sensors={sensors}
-        onDragStart={(e) => {
-          const s = e.active.data.current?.student as Student | undefined;
-          if (s) setActiveStudent(s);
-        }}
-        onDragEnd={onDragEnd}
-        modifiers={[restrictToParentElement, restrictToWindowEdges]}
-      >
-        <div
-          className="relative rounded-2xl bg-white shadow p-4 border border-slate-200"
-        >
-          <Grid seating={seating} getStudentAtSeat={getStudentAtSeat} />
-        </div>
-
-        <DragOverlay dropAnimation={{ duration: 150 }}>
-          {activeStudent ? <StudentCard student={activeStudent} dragging /> : null}
-        </DragOverlay>
-      </DndContext>
-
-      <UnseatedList
-        students={students}
-        seating={seating}
-        onPlace={(studentId, toSeat) => {
-          // Find current seat (if any), then move
-          const currentSeat = Object.keys(seating).find(k => seating[k] === studentId);
-          if (!currentSeat) {
-            setSeating(prev => {
-              const next = { ...prev };
-              next[toSeat] = studentId;
-              storage.set(STORAGE_KEY, next);
-              return next;
-            });
-          } else if (currentSeat !== toSeat) {
-            moveToEmpty(currentSeat, toSeat, studentId);
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <h2 className="text-lg font-semibold">Students (Global)</h2>
+        <button
+          className={
+            'ml-2 px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50 ' +
+            (isSyncing ? 'opacity-60 cursor-not-allowed' : '')
           }
-        }}
+          onClick={handleSync}
+          disabled={isSyncing}
+          aria-busy={isSyncing}
+          aria-live="polite"
+        >
+          {isSyncing ? 'Syncing…' : 'Sync from manifests'}
+        </button>
+
+        {/* Progress bar + spinner */}
+        {isSyncing && (
+          <div className="flex items-center gap-2">
+            <div className="w-40 h-2 rounded bg-slate-200 overflow-hidden" aria-label="Sync progress">
+              <div
+                className="h-2 bg-slate-700 transition-all"
+                style={{ width: `${Math.max(2, Math.min(100, syncPct))}%` }}
+              />
+            </div>
+            <div className="text-xs text-slate-600 min-w-[6rem]">{syncPct}% {syncLabel}</div>
+            <svg
+              className="animate-spin h-4 w-4 text-slate-600"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none" viewBox="0 0 24 24" role="img" aria-hidden="true"
+            >
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4A4 4 0 008 12H4z"/>
+            </svg>
+          </div>
+        )}
+
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/json"
+          className="hidden"
+          onChange={onImportRoster}
         />
-    </div>
-  );
-}
+        <button
+          className={
+            'px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50 ' +
+            (isSyncing ? 'opacity-60 cursor-not-allowed' : '')
+          }
+          onClick={onExportRoster}
+          title="Download the current students roster as JSON"
+          disabled={isSyncing}
+        >
+          Export roster JSON
+        </button>
+        <button
+          className={
+            'px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50 ' +
+            (isSyncing ? 'opacity-60 cursor-not-allowed' : '')
+          }
+          onClick={() => fileRef.current?.click()}
+          title="Import a students roster JSON (replace or merge)"
+          disabled={isSyncing}
+        >
+          Import roster JSON
+        </button>
 
-/* ---------- Presentational + DnD pieces ---------- */
-
-import { useDraggable, useDroppable } from "@dnd-kit/core";
-
-function Grid({ seating, getStudentAtSeat }: {
-  seating: SeatingMap;
-  getStudentAtSeat: (seatId: string) => Student | null;
-}) {
-  return (
-    <div
-      className="grid gap-3"
-      style={{
-        gridTemplateColumns: `repeat(${COLS}, minmax(0, 1fr))`
-      }}
-    >
-      {seatIds().map(id => (
-        <Seat key={id} id={id}>
-          {(() => {
-            const s = getStudentAtSeat(id);
-            return s ? <DraggableStudent seatId={id} student={s} /> : <EmptySeatBadge />;
-          })()}
-        </Seat>
-      ))}
-    </div>
-  );
-}
-
-function Seat({ id, children }: { id: string; children: React.ReactNode }) {
-  const { setNodeRef, isOver } = useDroppable({ id });
-  return (
-    <div
-      ref={setNodeRef}
-      className={`h-28 rounded-xl border flex items-center justify-center transition
-        ${isOver ? "border-blue-500 ring-2 ring-blue-200" : "border-slate-300"}
-        bg-slate-50`}
-      aria-label={`Seat ${id}`}
-    >
-      {children}
-    </div>
-  );
-}
-
-function EmptySeatBadge() {
-  return (
-    <div className="text-slate-400 text-sm select-none">Empty</div>
-  );
-}
-
-function DraggableStudent({ student, seatId }: { student: Student; seatId: string }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: `student:${student.id}`,
-    data: { studentId: student.id, seatId, student },
-  });
-
-  const style: React.CSSProperties = transform
-    ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
-    : undefined;
-
-  return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
-      <StudentCard student={student} dragging={isDragging} />
-    </div>
-  );
-}
-
-function StudentCard({ student, dragging }: { student: Student; dragging?: boolean }) {
-  return (
-    <div
-      className={`w-[150px] h-[72px] rounded-xl border bg-white shadow-sm px-3 py-2 flex items-center gap-3
-        ${dragging ? "opacity-90 scale-[1.02]" : "hover:shadow"} transition`}
-      >
-      {student.photo ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={student.photo} alt={student.name} className="w-10 h-10 rounded-full object-cover" />
-      ) : (
-        <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 text-sm">{initials(student.name)}</div>
-      )}
-      <div className="min-w-0">
-        <div className="text-sm font-medium truncate">{student.name}</div>
-        <div className="text-xs text-slate-500">Drag to move</div>
-      </div>
-    </div>
-  );
-}
-
-function initials(name: string) {
-  return name.split(" ").map(s => s[0]).slice(0, 2).join("").toUpperCase();
-}
-
-/** Optional: a panel that shows anyone not currently seated and lets you click-place them into an empty seat */
-function UnseatedList({
-  students,
-  seating,
-  onPlace,
-}: {
-  students: Student[];
-  seating: SeatingMap;
-  onPlace: (studentId: string, toSeat: string) => void;
-}) {
-  const seated = new Set(Object.values(seating).filter(Boolean) as string[]);
-  const unseated = students.filter(s => !seated.has(s.id));
-
-  if (unseated.length === 0) return null;
-
-  const firstEmpty = Object.keys(seating).find(k => seating[k] === null) ?? null;
-
-  return (
-    <div className="mt-6">
-      <h3 className="text-sm font-semibold text-slate-700 mb-2">Unseated</h3>
-      <div className="flex flex-wrap gap-3">
-        {unseated.map(s => (
+        <div className="ml-auto flex items-center gap-2">
           <button
-            key={s.id}
-            onClick={() => {
-              if (!firstEmpty) return;
-              onPlace(s.id, firstEmpty);
-            }}
-            className="rounded-xl border bg-white hover:bg-slate-50 px-3 py-2 flex items-center gap-2 text-left shadow-sm"
-            title="Click to place in first available seat"
+            className="px-2 py-1 text-xs rounded-md border border-slate-300 bg-white hover:bg-slate-50"
+            onClick={() => setAll(false)}
+            title="Expand all periods"
+            disabled={isSyncing}
           >
-            <span className="inline-flex w-7 h-7 rounded-full bg-slate-200 items-center justify-center text-xs text-slate-600">
-              {initials(s.name)}
-            </span>
-            <span className="text-sm">{s.name}</span>
+            Expand all
           </button>
-        ))}
+          <button
+            className="px-2 py-1 text-xs rounded-md border border-slate-300 bg-white hover:bg-slate-50"
+            onClick={() => setAll(true)}
+            title="Collapse all periods"
+            disabled={isSyncing}
+          >
+            Collapse all
+          </button>
+          <input
+            className="w-64 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+            placeholder="Search by name..."
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            disabled={isSyncing}
+          />
+        </div>
+      </div>
+
+      {periods.map((p) => {
+        const raw = Array.isArray(cfg[p]) ? cfg[p] : []                           // ✅ guard
+        const list = raw.slice().sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b))).filter(matches)
+        const isCollapsed = collapsed[p]
+        const totalCount = raw.length                                             // keep header count semantics
+        return (
+          <div key={p} className="rounded-lg border border-slate-200 bg-white">
+            <div className="px-3 py-2 border-b border-slate-200 text-sm font-medium flex items-center">
+              <button
+                className="mr-2 text-slate-600 hover:text-slate-900"
+                onClick={() => setCollapsed(prev => ({ ...prev, [p]: !prev[p] }))}
+                title={isCollapsed ? 'Expand' : 'Collapse'}
+                disabled={isSyncing}
+              >
+                {isCollapsed ? '▶' : '▼'}
+              </button>
+              <span className="mr-2">{p.toUpperCase()} — {totalCount} students</span>
+              <button
+                className="ml-auto text-xs text-slate-600 hover:text-slate-900"
+                onClick={() => setCollapsed(prev => ({ ...prev, [p]: !prev[p] }))}
+                disabled={isSyncing}
+              >
+                {isCollapsed ? 'Expand' : 'Collapse'}
+              </button>
+            </div>
+
+            {!isCollapsed && (
+              <div className="p-3 space-y-1">
+                {/* Header row */}
+                <div className="grid grid-cols-12 gap-2 px-2 text-xs text-slate-500">
+                  <div className="col-span-3">Display Name</div>
+                  <div className="col-span-3">File Name</div>
+                  <div className="col-span-3">Tags</div>
+                  <div className="col-span-3">Notes</div>
+                </div>
+
+                {list.map((s) => (
+                  <Row
+                    key={s.id}
+                    period={p}
+                    student={s}
+                    onChange={(patch) => updateStudent(p, s.id, patch)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function Row({
+  period,
+  student,
+  onChange,
+}: {
+  period: PeriodId
+  student: StudentMeta
+  onChange: (patch: Partial<StudentMeta>) => void
+}) {
+  const displayValue = (student.displayName ?? student.name)
+
+  function toggleTag(tag: AllowedTag) {
+    const curr = Array.isArray(student.tags) ? student.tags.slice() : []
+    const has = curr.includes(tag)
+    const next = has ? curr.filter((t) => t !== tag) : [...curr, tag]
+    onChange({ tags: next })
+  }
+
+  return (
+    <div className="grid grid-cols-12 items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-50">
+      {/* Display Name (editable) */}
+      <div className="col-span-3">
+        <input
+          className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+          value={displayValue}
+          placeholder={student.name}
+          onChange={(e) => onChange({ displayName: e.target.value })}
+          onBlur={(e) => {
+            const v = e.target.value.trim()
+            onChange({ displayName: v === student.name.trim() ? undefined : v })
+          }}
+        />
+      </div>
+
+      {/* File Name (read-only) */}
+      <div className="col-span-3">
+        <input
+          className="w-full rounded-md border border-slate-200 bg-slate-100/60 px-2 py-1.5 text-sm text-slate-700"
+          value={student.name}
+          readOnly
+          aria-readonly
+          tabIndex={-1}
+        />
+      </div>
+
+      {/* Tags (toggle chips) */}
+      <div className="col-span-3">
+        <div className="flex flex-wrap gap-1">
+          {ALLOWED_TAGS.map((tag) => {
+            const active = Array.isArray(student.tags) && student.tags.includes(tag)
+            return (
+              <button
+                key={tag}
+                type="button"
+                className={
+                  'px-2 py-1 rounded border text-xs leading-none ' +
+                  (active
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50')
+                }
+                onClick={() => toggleTag(tag)}
+                title={tag}
+              >
+                {tag}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Notes (single-row) */}
+      <div className="col-span-3">
+        <textarea
+          className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm resize-none h-9"
+          rows={1}
+          placeholder="Behavior notes, accommodations, etc."
+          value={student.notes ?? ''}
+          onChange={(e) => onChange({ notes: e.target.value })}
+        />
       </div>
     </div>
-  );
+  )
 }
