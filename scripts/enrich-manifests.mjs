@@ -5,6 +5,8 @@
  *
  * Scans public/photos/<period> folders for image files and (re)generates
  * public/photos/<period>/index.json with a normalized array of entries.
+ * Also generates a top-level public/photos/index.json that aggregates the
+ * filenames per period and includes a version stamp when content changes.
  *
  * Behavior:
  * - For NEW photos (no existing entry), creates an entry with placeholders:
@@ -20,6 +22,15 @@
  *   - Ensures all keys exist (displayName, tags, notes).
  *   - Filters tags to the allowed set: ["front row", "back row", "near TB"].
  * - Removes entries for images that no longer exist in the folder.
+ * - Writes per-period manifests at public/photos/<period>/index.json.
+ * - Writes a top-level aggregator at public/photos/index.json with:
+ *     {
+ *       "periods": ["p1","p3","p4","p5","p6"],
+ *       "p1": ["fileA.jpg","fileB.jpg", ...],
+ *       "p3": [...],
+ *       ...
+ *       "version": 1736963270000   // only updated when content changes
+ *     }
  * - Keeps output stable and pretty-printed with a trailing newline.
  *
  * Flags:
@@ -31,6 +42,7 @@ import path from 'node:path'
 
 const ROOT = process.cwd()
 const PHOTOS_DIR = path.join(ROOT, 'public', 'photos')
+const TOP_INDEX_PATH = path.join(PHOTOS_DIR, 'index.json')
 
 // Allowed image extensions and tags
 const ALLOWED_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp'])
@@ -135,13 +147,39 @@ function mergeEntries(period, files, existing) {
   return merged
 }
 
+// ---------- Aggregator helpers ----------
+/**
+ * Build the top-level index.json "body" which is stable and comparable.
+ * We intentionally do not include "version" in this object so we can compare
+ * content-only changes. The version is added only when writing to disk and
+ * only if the content differs from the previous file.
+ */
+function buildTopIndexBody(periods, perPeriodFiles) {
+  const body = { periods: periods.slice() }
+  for (const p of periods) {
+    body[p] = (perPeriodFiles[p] || []).slice()
+  }
+  return body
+}
+
+function readTopIndexBody(file) {
+  const json = readJSON(file)
+  if (!json) return null
+  const { version, ...rest } = json
+  return rest
+}
+
 // ---------- Main ----------
 function run() {
   let changed = false
 
-  for (const period of listPeriods()) {
+  const periods = listPeriods()
+  const perPeriodFiles = {}
+
+  for (const period of periods) {
     const dir = path.join(PHOTOS_DIR, period)
     const files = listImages(dir)
+    perPeriodFiles[period] = files
     const manifestPath = path.join(dir, 'index.json')
     const existing = readJSON(manifestPath)
 
@@ -157,6 +195,26 @@ function run() {
         writeJSON(manifestPath, next)
         console.log(`[write] ${path.relative(ROOT, manifestPath)} (${next.length} entries)`)
       }
+    }
+  }
+
+  // Build and compare the top-level aggregator
+  const nextTopBody = buildTopIndexBody(periods, perPeriodFiles)
+  const prevTopBody = readTopIndexBody(TOP_INDEX_PATH)
+  const nextTopJsonBody = JSON.stringify(nextTopBody, null, 2) + '\n'
+  const prevTopJsonBody = prevTopBody ? JSON.stringify(prevTopBody, null, 2) + '\n' : null
+
+  if (prevTopJsonBody !== nextTopJsonBody) {
+    if (CHECK_ONLY) {
+      console.log(`[diff] ${path.relative(ROOT, TOP_INDEX_PATH)}`)
+      changed = true
+    } else {
+      // Only bump version when content changed
+      const toWrite = { ...nextTopBody, version: Date.now() }
+      writeJSON(TOP_INDEX_PATH, toWrite)
+      const periodCount = periods.length
+      const fileCount = periods.reduce((acc, p) => acc + (perPeriodFiles[p]?.length || 0), 0)
+      console.log(`[write] ${path.relative(ROOT, TOP_INDEX_PATH)} (periods=${periodCount}, files=${fileCount})`)
     }
   }
 
