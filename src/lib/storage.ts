@@ -121,7 +121,7 @@ function defaultTemplate(): TemplateConfig {
 
   // Fixtures are explicitly included in the template so they persist
   const fixtures: TemplateConfig['fixtures'] = [
-    { id: 'fx1', type: 'tb', x: 0, y: -cardH / 2 }, // example: teacher's desk near top
+   
   ]
 
   return {
