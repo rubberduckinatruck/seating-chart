@@ -1,143 +1,192 @@
 // src/tabs/PeriodTab.tsx
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { PeriodId } from '../lib/constants'
 import { storage } from '../lib/storage'
 import type {
   PeriodAssignments,
   RulesConfig,
-  ExcludedSeats,
   StudentMeta,
+  TemplateConfig,
 } from '../lib/types'
 import { getDisplayName } from '../lib/utils'
 import PeriodSeat from '../components/PeriodSeat'
 import AssignmentToolbar from '../components/AssignmentToolbar'
 import RulesManager from '../components/RulesManager'
-import { assignSeating, type AssignContext } from '../lib/assign'
 import ExportButtons from '../components/ExportButtons'
+import {
+  DndContext,
+  DragEndEvent,
+  DragOverlay,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core'
+import StudentDragPreview from '../components/StudentDragPreview'
+import { moveOrSwapStudent } from '../lib/moves'
 import Fixture from '../components/Fixture'
 
+/* --------------------------------- Helpers --------------------------------- */
+function buildBlankAssignments(template: TemplateConfig): Record<string, string | null> {
+  const next: Record<string, string | null> = {}
+  for (const d of template.desks) next[d.id] = null
+  return next
+}
+function buildAssignmentsForPeriod(
+  template: TemplateConfig,
+  savedAll: PeriodAssignments,
+  periodId: PeriodId
+): Record<string, string | null> {
+  const saved = savedAll[periodId]
+  if (!saved) return buildBlankAssignments(template)
+  const next = buildBlankAssignments(template)
+  for (const [seatId, studentId] of Object.entries(saved)) {
+    if (seatId in next) next[seatId] = studentId
+  }
+  return next
+}
+function buildExcludedForPeriod(
+  excludedMap: Record<string, string[]>,
+  periodId: PeriodId
+): Set<string> {
+  const arr = (excludedMap && excludedMap[periodId]) || []
+  return new Set(arr)
+}
+function buildRulesForPeriod(
+  savedRules: RulesConfig,
+  periodId: PeriodId
+): { together: [string, string][], apart: [string, string][] } {
+  const r = savedRules[periodId] || { together: [], apart: [] }
+  return { together: r.together.slice(), apart: r.apart.slice() }
+}
+
+function randomAssign(
+  template: TemplateConfig,
+  students: StudentMeta[],
+  excluded: Set<string>
+): Record<string, string | null> {
+  const seats = template.desks.map(d => d.id).filter(id => !excluded.has(id))
+  const ids = students.map(s => s.id)
+  for (let i = ids.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[ids[i], ids[j]] = [ids[j], ids[i]]
+  }
+  const next = buildBlankAssignments(template)
+  for (let i = 0; i < seats.length; i++) next[seats[i]] = ids[i] ?? null
+  return next
+}
+function alphaAssign(
+  template: TemplateConfig,
+  students: StudentMeta[],
+  excluded: Set<string>
+): Record<string, string | null> {
+  const seats = template.desks.map(d => d.id).filter(id => !excluded.has(id))
+  const sorted = [...students].sort((a, b) =>
+    getDisplayName(a).localeCompare(getDisplayName(b))
+  )
+  const next = buildBlankAssignments(template)
+  for (let i = 0; i < seats.length; i++) next[seats[i]] = sorted[i]?.id ?? null
+  return next
+}
+
+/* -------------------------------- Component -------------------------------- */
 export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
-  // force refresh when fixtures/students are broadcast-updated
+  // bump UI when other tabs write to storage with sc.* OR seating.* keys
   const [, setRefreshTick] = useState(0)
   useEffect(() => {
     function bump() { setRefreshTick(t => t + 1) }
-    function onFx() { bump() }
-    function onStudents() { bump() }
     function onStorage(e: StorageEvent) {
-      if (!e.key || !e.key.startsWith('seating.')) return
+      if (!e.key) return
+      const k = e.key
+      const isOurKey = k.startsWith('sc.') || k.startsWith('seating.')
+      if (!isOurKey) return
       bump()
     }
-    window.addEventListener('seating:fixtures-updated', onFx as EventListener)
-    window.addEventListener('seating:students-updated', onStudents as EventListener)
     window.addEventListener('storage', onStorage)
-    return () => {
-      window.removeEventListener('seating:fixtures-updated', onFx as EventListener)
-      window.removeEventListener('seating:students-updated', onStudents as EventListener)
-      window.removeEventListener('storage', onStorage)
-    }
+    return () => window.removeEventListener('storage', onStorage)
   }, [])
 
-  // snapshot config/state from storage
-  const template = storage.getTemplate()
+  // read current template (with desks, fixtures, spacing)
+  const template = storage.getTemplate() as TemplateConfig
+  const { cardW, cardH, withinPair, betweenPairs, rowGap } = template.spacing
+
+  // replicate TemplateTab sizing math
+  const gridW = 3 * (2 * cardW + withinPair + betweenPairs)
+  const gridH = 6 * (cardH + rowGap) + 100
+  const EXTRA = 350
+  const outerW = Math.max(900, gridW + EXTRA)
+  const outerH = gridH
+  const leftPad = Math.floor((outerW - gridW) / 2)
+
   const studentsCfg = storage.getStudents()
   const rulesCfg = storage.getRules()
-  const excludedCfg = storage.getExcluded()
+  const excludedMap = storage.getExcluded() as unknown as Record<string, string[]>
   const assignCfg = storage.getAssignments()
 
-  // helpers based on current template
-  function blankAssignments(): Record<string, string | null> {
-    const next: Record<string, string | null> = {}
-    for (const d of template.desks) next[d.id] = null
-    return next
-  }
-  function buildAssignmentsForPeriod(pid: PeriodId): Record<string, string | null> {
-    const saved = assignCfg[pid] || {}
-    return { ...blankAssignments(), ...saved }
-  }
-  function buildExcludedForPeriod(pid: PeriodId): Set<string> {
-    const savedArr = excludedCfg[pid] || []
-    return new Set(savedArr)
-  }
-  function buildRulesForPeriod(pid: PeriodId): { together: [string, string][]; apart: [string, string][] } {
-    const saved = rulesCfg[pid] || { together: [], apart: [] }
-    return { together: saved.together.slice(), apart: saved.apart.slice() }
-  }
-
-  // local state per period
+  // build local state from storage
   const [assignments, setAssignments] = useState<Record<string, string | null>>(
-    () => buildAssignmentsForPeriod(periodId)
+    () => buildAssignmentsForPeriod(template, assignCfg, periodId)
   )
   const [excluded, setExcluded] = useState<Set<string>>(
-    () => buildExcludedForPeriod(periodId)
+    () => buildExcludedForPeriod(excludedMap, periodId)
   )
-  const [rules, setRules] = useState<{ together: [string, string][]; apart: [string, string][] }>(
-    () => buildRulesForPeriod(periodId)
+  const [rules, setRules] = useState<{ together: [string, string][], apart: [string, string][] }>(
+    () => buildRulesForPeriod(rulesCfg, periodId)
   )
   const [selectedSeat, setSelectedSeat] = useState<string | null>(null)
-  const [conflictNotes, setConflictNotes] = useState<string[]>([])
 
-  // re-hydrate when period changes
+  // re-hydrate when periodId changes
   useEffect(() => {
-    setAssignments(buildAssignmentsForPeriod(periodId))
-    setExcluded(buildExcludedForPeriod(periodId))
-    setRules(buildRulesForPeriod(periodId))
+    setAssignments(buildAssignmentsForPeriod(template, assignCfg, periodId))
+    setExcluded(buildExcludedForPeriod(excludedMap, periodId))
+    setRules(buildRulesForPeriod(rulesCfg, periodId))
     setSelectedSeat(null)
-    setConflictNotes([])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodId])
 
-  const students = useMemo(
-    () =>
-      studentsCfg[periodId]
-        .slice()
-        .sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b))),
-    [studentsCfg, periodId]
-  )
+  const students: StudentMeta[] = studentsCfg[periodId] || []
+  const periodLabel = `Period ${periodId.slice(1)}`
 
-  const canvasRef = useRef<HTMLDivElement | null>(null)
-
-  // persist helpers
+  // persistence helpers
   function persistAssignments(next: Record<string, string | null>) {
-    const all: PeriodAssignments = storage.getAssignments()
-    all[periodId] = next
-    storage.setAssignments(all)
+    const full = { ...assignCfg, [periodId]: next }
+    storage.setAssignments(full)
+    try { localStorage.setItem('sc.bump', String(Date.now())) } catch {}
+    try { localStorage.setItem('seating.bump', String(Date.now())) } catch {}
   }
   function persistExcluded(next: Set<string>) {
-    const all: ExcludedSeats = storage.getExcluded()
-    all[periodId] = Array.from(next)
-    storage.setExcluded(all)
+    const arr = Array.from(next)
+    const full = { ...excludedMap, [periodId]: arr }
+    storage.setExcluded(full as any)
+    try { localStorage.setItem('sc.bump', String(Date.now())) } catch {}
+    try { localStorage.setItem('seating.bump', String(Date.now())) } catch {}
   }
-  function persistRules(next: { together: [string, string][]; apart: [string, string][] }) {
-    const all: RulesConfig = storage.getRules()
-    all[periodId] = { together: next.together.slice(), apart: next.apart.slice() }
-    storage.setRules(all)
+  function persistRules(next: { together: [string, string][], apart: [string, string][] }) {
+    const full: RulesConfig = { ...rulesCfg, [periodId]: next } as RulesConfig
+    storage.setRules(full)
+    try { localStorage.setItem('sc.bump', String(Date.now())) } catch {}
+    try { localStorage.setItem('seating.bump', String(Date.now())) } catch {}
   }
 
-  // toolbar actions
-  function clearAll() {
-    const next = blankAssignments()
+  // assignment actions
+  function randomize() {
+    const next = randomAssign(template, students, excluded)
     setAssignments(next)
     persistAssignments(next)
   }
-  function randomize() {
-    const ctx: AssignContext = { template, students, excluded, rules }
-    const res = assignSeating(ctx, 'random')
-    const next = blankAssignments()
-    for (const [sid, seatId] of res.seatOf.entries()) next[seatId] = sid
+  function clearAll() {
+    const next = buildBlankAssignments(template)
     setAssignments(next)
     persistAssignments(next)
-    setConflictNotes(res.conflicts)
+    setSelectedSeat(null)
   }
   function sortAlpha() {
-    const ctx: AssignContext = { template, students, excluded, rules }
-    const res = assignSeating(ctx, 'alpha')
-    const next = blankAssignments()
-    for (const [sid, seatId] of res.seatOf.entries()) next[seatId] = sid
+    const next = alphaAssign(template, students, excluded)
     setAssignments(next)
     persistAssignments(next)
-    setConflictNotes(res.conflicts)
   }
 
-  // seat interactions
+  // seat interactions: click-to-swap
   function onSeatClick(seatId: string) {
     if (selectedSeat === null) { setSelectedSeat(seatId); return }
     if (selectedSeat === seatId) { setSelectedSeat(null); return }
@@ -155,75 +204,109 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
     setExcluded(next)
     persistExcluded(next)
   }
-  function unassignSeat(seatId: string) {
-    const next = { ...assignments, [seatId]: null }
-    setAssignments(next)
-    persistAssignments(next)
-  }
-  function onDropStudent(toSeatId: string, studentId: string) {
-    const fromSeatId = Object.keys(assignments).find(k => assignments[k] === studentId) || null
-    const targetStudent = assignments[toSeatId] ?? null
-    const next = { ...assignments }
-    if (fromSeatId) next[fromSeatId] = targetStudent
-    next[toSeatId] = studentId
-    setAssignments(next)
-    persistAssignments(next)
+
+  // ----- DnD (mouse-only) -----
+  const sensors = useSensors(useSensor(PointerSensor))
+  const [dragStudent, setDragStudent] = useState<{ id: string; name: string | null } | null>(null)
+
+  function handleDragStart(e: any) {
+    const sid = e.active?.id as string | undefined
+    if (!sid) return
+    const s = students.find(x => x.id === sid) || null
+    setDragStudent({ id: sid, name: s ? getDisplayName(s) : null })
   }
 
-  // rules helpers
-  function addRule(kind: 'together' | 'apart', pair: [string, string]) {
-    const next =
-      kind === 'together'
-        ? { ...rules, together: rules.together.concat([pair]) }
-        : { ...rules, apart: rules.apart.concat([pair]) }
-    setRules(next)
-    persistRules(next)
-  }
-  function removeRule(kind: 'together' | 'apart', idx: number) {
-    const next =
-      kind === 'together'
-        ? { ...rules, together: rules.together.filter((_, i) => i !== idx) }
-        : { ...rules, apart: rules.apart.filter((_, i) => i !== idx) }
-    setRules(next)
-    persistRules(next)
+  function handleDragEnd(e: DragEndEvent) {
+    const sid = e.active?.id as string | undefined
+    const overId = (e.over?.id as string | undefined) || null
+    setDragStudent(null)
+    if (!sid || !overId) return
+    const res = moveOrSwapStudent(assignments, excluded, sid, overId)
+    if (res.error === 'excluded') return
+    if (res.next !== assignments) {
+      setAssignments(res.next)
+      persistAssignments(res.next)
+    }
   }
 
-  // canvas sizing / centering
-  const w = template.spacing.cardW
-  const h = template.spacing.cardH
-  const gridW = 3 * (2 * w + template.spacing.withinPair + template.spacing.betweenPairs)
-  const gridH = 6 * (h + template.spacing.rowGap) + 100
-  const outerW = Math.max(900, gridW + 200)
-  const outerH = gridH
-  const leftPad = Math.floor((outerW - gridW) / 2)
+  // Layout menu: sync from Template
+  function syncLayoutFromTemplate() {
+    const freshTemplate = storage.getTemplate() as TemplateConfig
+    const baseline = buildBlankAssignments(freshTemplate)
+    const nextAssign: Record<string, string | null> = { ...baseline }
+    for (const seatId of Object.keys(baseline)) {
+      if (seatId in assignments) nextAssign[seatId] = assignments[seatId]
+    }
+    const nextExcluded = new Set<string>()
+    for (const seatId of Object.keys(baseline)) {
+      if (excluded.has(seatId)) nextExcluded.add(seatId)
+    }
+    setAssignments(nextAssign)
+    setExcluded(nextExcluded)
+    const fullAssign = { ...storage.getAssignments(), [periodId]: nextAssign }
+    storage.setAssignments(fullAssign)
+    const exclMap = storage.getExcluded() as any as Record<string, string[]>
+    const fullExcl = { ...exclMap, [periodId]: Array.from(nextExcluded) }
+    storage.setExcluded(fullExcl as any)
+    try { localStorage.setItem('sc.bump', String(Date.now())) } catch {}
+    try { localStorage.setItem('seating.bump', String(Date.now())) } catch {}
+  }
 
-  const periodLabel = `Period ${periodId.slice(1)}`
-
-  // Rules dropdown on header row
-  const [openRules, setOpenRules] = useState(false)
-  const rulesRef = useRef<HTMLDivElement | null>(null)
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') setOpenRules(false) }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  const [layoutOpen, setLayoutOpen] = useState(false)
+  const layoutRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     function onDoc(e: MouseEvent) {
-      if (!openRules) return
       const n = e.target as Node
-      if (rulesRef.current && !rulesRef.current.contains(n)) setOpenRules(false)
+      if (layoutRef.current && !layoutRef.current.contains(n)) setLayoutOpen(false)
     }
     document.addEventListener('mousedown', onDoc)
     return () => document.removeEventListener('mousedown', onDoc)
-  }, [openRules])
+  }, [])
 
+  // -------- Rules popover via PORTAL (always on top) --------
+  const [rulesOpen, setRulesOpen] = useState(false)
+  const rulesBtnRef = useRef<HTMLButtonElement | null>(null)
+  const rulesPanelRef = useRef<HTMLDivElement | null>(null)
+  const [rulesPos, setRulesPos] = useState<{ top: number; left: number } | null>(null)
+
+  useEffect(() => {
+    if (!rulesOpen) return
+    function compute() {
+      if (!rulesBtnRef.current) return
+      const r = rulesBtnRef.current.getBoundingClientRect()
+      const PANEL_W = rulesPanelRef.current?.offsetWidth ?? 640
+      const left = Math.max(8, r.right - PANEL_W)
+      const top = Math.max(8, r.bottom + 8)
+      setRulesPos({ top, left })
+    }
+    compute()
+    window.addEventListener('resize', compute)
+    window.addEventListener('scroll', compute, true)
+    return () => {
+      window.removeEventListener('resize', compute)
+      window.removeEventListener('scroll', compute, true)
+    }
+  }, [rulesOpen])
+
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (!rulesOpen) return
+      const n = e.target as Node
+      if (rulesBtnRef.current?.contains(n)) return
+      if (rulesPanelRef.current?.contains(n)) return
+      setRulesOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [rulesOpen])
+
+  /* ------------------------------ Render ------------------------------ */
   return (
-    <div className="space-y-4">
-      {/* HEADER ROW: title + assignment buttons + rules dropdown */}
-      <div className="flex items-center gap-3 flex-wrap relative">
+    <div className="space-y-3">
+      {/* HEADER ROW */}
+      <div className="flex items-center gap-2 flex-wrap relative transform origin-top-left scale-90 z-40">
         <h2 className="text-lg font-semibold">{periodLabel}</h2>
 
-        {/* Assignment toolbar moved up here */}
         <div className="flex items-center gap-2">
           <AssignmentToolbar
             onRandomize={randomize}
@@ -233,97 +316,141 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
           <ExportButtons targetSelector="#period-canvas" fileBase={`seating-${periodId}`} />
         </div>
 
-        {/* Rules dropdown on same line, aligned right */}
-        <div className="ml-auto relative" ref={rulesRef}>
+        <div className="ml-auto flex items-center gap-2">
+          {/* Layout dropdown */}
+          <div className="relative" ref={layoutRef}>
+            <button
+              type="button"
+              className="px-2 py-1 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50"
+              onClick={() => setLayoutOpen(v => !v)}
+              aria-expanded={layoutOpen}
+            >
+              Layout ▾
+            </button>
+            {layoutOpen && (
+              <div className="absolute right-0 z-50 mt-2 min-w-56 rounded-lg border bg-white p-2 shadow">
+                <button
+                  type="button"
+                  className="w-full text-left px-2 py-1 text-sm rounded hover:bg-slate-50"
+                  onClick={() => { syncLayoutFromTemplate(); setLayoutOpen(false) }}
+                >
+                  Use current Template layout
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Rules button */}
           <button
+            ref={rulesBtnRef}
             type="button"
             className="px-2 py-1 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50"
-            onClick={() => setOpenRules(v => !v)}
-            aria-expanded={openRules}
+            onClick={() => setRulesOpen(v => !v)}
+            aria-expanded={rulesOpen}
             aria-haspopup="dialog"
-            title={openRules ? 'Collapse rules' : 'Expand rules'}
           >
-            Rules {openRules ? '▴' : '▾'}
+            Rules ▾
           </button>
-
-          {openRules && (
-            <div
-              className="absolute right-0 mt-2 z-20 w-[min(720px,90vw)] rounded-lg border border-slate-200 bg-white shadow-lg p-3"
-              role="dialog"
-              aria-label="Rules"
-            >
-              <RulesManager
-                students={students as StudentMeta[]}
-                together={rules.together}
-                apart={rules.apart}
-                onAdd={addRule}
-                onRemove={removeRule}
-              />
-            </div>
-          )}
         </div>
       </div>
 
-      {/* Canvas */}
-      <div
-        id="period-canvas"
-        ref={canvasRef}
-        className="relative mx-auto border border-slate-200 rounded-lg bg-slate-50 overflow-hidden"
-        style={{ width: outerW, height: outerH }}
-      >
-        <div className="absolute left-0 right-0 top-2 text-center text-xs text-slate-500">
-          Front of classroom
-        </div>
-
-        {/* Fixtures layer (non-interactive) */}
+      {/* CANVAS */}
+      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         <div
-          className="absolute top-0 pointer-events-none"
-          style={{ left: leftPad, width: gridW, height: outerH }}
+          id="period-canvas"
+          className="relative z-0 rounded-md border bg-slate-100 mx-auto shrink-0"
+          style={{ width: outerW, height: outerH }}
         >
-          {template.fixtures?.map((f) => (
-            <Fixture
-              key={f.id}
-              id={f.id}
-              type={f.type as any}
-              x={f.x}
-              y={f.y}
-              onMove={() => {}}
-              onRemove={() => {}}
-            />
-          ))}
+          {/* Board indicator */}
+          <div className="absolute left-0 right-0 top-2 text-center text-xs text-slate-500 pointer-events-none">
+            Front of classroom
+          </div>
+
+          {/* Inner layer */}
+          <div className="absolute top-0" style={{ left: leftPad, width: gridW, height: outerH }}>
+            {/* Fixtures (display-only on Period tab) */}
+{template.fixtures.map(f => (
+  <Fixture
+    key={f.id}
+    id={f.id}
+    type={f.type}
+    x={f.x}
+    y={f.y}
+    editable={false}
+    onMove={() => {}}
+    onRemove={() => {}}
+  />
+))}
+
+
+            {/* Seats */}
+            {template.desks.map(d => {
+              const seatId = d.id
+              const studentId = assignments[seatId] ?? null
+              const s = studentId ? students.find(x => x.id === studentId) || null : null
+              const name = s ? getDisplayName(s) : null
+              return (
+                <PeriodSeat
+                  key={seatId}
+                  periodId={periodId}
+                  seatId={seatId}
+                  x={d.x}
+                  y={d.y}
+                  w={cardW}
+                  h={cardH}
+                  tags={d.tags}
+                  isExcluded={excluded.has(seatId)}
+                  isSelected={selectedSeat === seatId}
+                  studentId={studentId}
+                  studentName={name}
+                  onClick={() => onSeatClick(seatId)}
+                  onToggleExclude={() => toggleExcluded(seatId)}
+                />
+              )
+            })}
+          </div>
         </div>
 
-        {/* Seats layer */}
-        <div className="absolute top-0" style={{ left: leftPad, width: gridW, height: outerH }}>
-          {template.desks.map(d => {
-            const seatId = d.id
-            const studentId = assignments[seatId] ?? null
-            const s = studentId ? students.find(x => x.id === studentId) || null : null
-            const name = s ? getDisplayName(s) : null
-            return (
-              <PeriodSeat
-                key={seatId}
-                periodId={periodId}
-                seatId={seatId}
-                x={d.x}
-                y={d.y}
-                w={w}
-                h={h}
-                tags={d.tags}
-                isExcluded={excluded.has(seatId)}
-                isSelected={selectedSeat === seatId}
-                studentId={studentId}
-                studentName={name}
-                onClick={() => onSeatClick(seatId)}
-                onToggleExclude={() => toggleExcluded(seatId)}
-                onUnassign={() => unassignSeat(seatId)}
-                onDropStudent={(sid) => onDropStudent(seatId, sid)}
-                onDragStudentStart={() => {}}
-              />
-            )
-          })}
-        </div>
-      </div>
+        <DragOverlay>
+          {dragStudent ? (
+            <StudentDragPreview
+              periodId={periodId}
+              studentId={dragStudent.id}
+              studentName={dragStudent.name}
+            />
+          ) : null}
+        </DragOverlay>
+      </DndContext>
+
+      {/* RULES PANEL PORTAL */}
+      {rulesOpen && rulesPos && createPortal(
+        <div
+          ref={rulesPanelRef}
+          className="fixed z-[1000] w-[640px] max-w-[95vw] rounded-lg border bg-white p-2 shadow-2xl"
+          style={{ top: rulesPos.top, left: rulesPos.left }}
+        >
+          <div className="text-xs">
+            <RulesManager
+              students={students}
+              together={rules.together}
+              apart={rules.apart}
+              onAdd={(k, pair) => {
+                const n = { together: rules.together.slice(), apart: rules.apart.slice() }
+                n[k].push(pair)
+                setRules(n)
+                persistRules(n)
+              }}
+              onRemove={(k, idx) => {
+                const n = { together: rules.together.slice(), apart: rules.apart.slice() }
+                n[k].splice(idx, 1)
+                setRules(n)
+                persistRules(n)
+              }}
+            />
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   )
 }

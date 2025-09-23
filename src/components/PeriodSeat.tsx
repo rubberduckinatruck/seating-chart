@@ -1,6 +1,8 @@
 // src/components/PeriodSeat.tsx
 import React from 'react'
 import { withBase } from '../lib/withBase'
+import { useDroppable } from '@dnd-kit/core'
+import StudentDraggable from './StudentDraggable'
 
 type Props = {
   periodId: string
@@ -16,19 +18,21 @@ type Props = {
   studentName: string | null
   onClick: () => void              // used for select/swap on non-back-row seats
   onToggleExclude: () => void      // toggles exclude state
-  onUnassign?: () => void          // kept for compatibility; not rendered
-  onDropStudent: (studentId: string) => void
-  onDragStudentStart: () => void
 }
 
 export default function PeriodSeat(props: Props) {
   const {
     periodId, seatId, x, y, w, h, tags = [],
     isExcluded, isSelected, studentId, studentName,
-    onClick, onToggleExclude, onDropStudent,
+    onClick, onToggleExclude,
   } = props
 
   const isBackRow = Array.isArray(tags) && tags.includes('back row')
+
+  // DnD droppable
+  const { isOver, setNodeRef } = useDroppable({ id: seatId, data: { type: 'seat', seatId } })
+  const canAccept = !isExcluded
+  const overAndValid = isOver && canAccept
 
   // Click behavior:
   // - Back row: clicking toggles exclude (multi-select friendly: no selection state)
@@ -38,28 +42,21 @@ export default function PeriodSeat(props: Props) {
     else onClick()
   }
 
-  // DnD (move student onto seat)
-  function handleDragOver(e: React.DragEvent) { e.preventDefault() }
-  function handleDrop(e: React.DragEvent) {
-    e.preventDefault()
-    const sid = e.dataTransfer.getData('text/student-id') || e.dataTransfer.getData('text/plain')
-    if (sid) onDropStudent(sid)
-  }
-
   // Student image (id is the filename)
   const imgSrc = studentId ? withBase(`photos/${periodId}/${studentId}`) : null
 
   return (
     <div
+      ref={setNodeRef}
       data-seat={seatId}
+      data-droppable-over={overAndValid ? 'true' : 'false'}
       onClick={handleClick}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
       className={[
         'absolute rounded-lg border bg-white cursor-pointer select-none transition',
         // Only show the select outline on NON-back-row seats
         (!isBackRow && isSelected) ? 'ring-2 ring-blue-500 shadow' : 'hover:shadow',
         isExcluded ? 'opacity-60' : '',
+        overAndValid ? 'ring-2 ring-emerald-500 ring-offset-2' : ''
       ].join(' ')}
       style={{ left: x, top: y, width: w, height: h, padding: 8 }}
       title={isBackRow ? 'Click to exclude/include (back row)' : 'Click to select'}
@@ -67,29 +64,21 @@ export default function PeriodSeat(props: Props) {
       {/* faint X overlay when excluded */}
       {isExcluded && (
         <div className="pointer-events-none absolute inset-1 flex items-center justify-center">
-          <div className="absolute inset-2 opacity-20">
-            <div className="absolute inset-0 border-2 border-slate-700/60 rotate-45" />
-            <div className="absolute inset-0 border-2 border-slate-700/60 -rotate-45" />
-          </div>
+          <svg width="100%" height="100%">
+            <line x1="0" y1="0" x2="100%" y2="100%" stroke="#94a3b8" strokeWidth="2" strokeDasharray="6 6" />
+            <line x1="100%" y1="0" x2="0" y2="100%" stroke="#94a3b8" strokeWidth="2" strokeDasharray="6 6" />
+          </svg>
         </div>
       )}
 
       {/* Seat content */}
       {studentId ? (
-        <div className="h-full w-full flex flex-col items-center justify-start">
-          <div className="w-full flex-1 overflow-hidden rounded-md border bg-slate-50 relative">
-            <img
-              src={imgSrc!}
-              alt={studentName ?? studentId}
-              className="block w-full h-full object-cover"
-              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
-              draggable={false}
-            />
-          </div>
-          <div className="mt-1 text-sm text-center truncate w-full" title={studentName ?? studentId}>
-            {studentName ?? studentId}
-          </div>
-        </div>
+        <StudentDraggable
+          periodId={periodId}
+          seatId={seatId}
+          studentId={studentId}
+          studentName={studentName}
+        />
       ) : (
         <div className="h-full w-full flex items-center justify-center text-xs text-slate-500">
           Empty

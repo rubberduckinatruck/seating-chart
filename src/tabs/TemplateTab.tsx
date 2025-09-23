@@ -10,7 +10,7 @@ import { intersects, type Rect } from '../lib/drag'
 export default function TemplateTab() {
   const [cfg, setCfg] = useState<TemplateConfig>(() => storage.getTemplate())
 
-  // persist template changes
+  // persist template changes (desks + fixtures + spacing all included)
   useEffect(() => {
     storage.setTemplate(cfg)
   }, [cfg])
@@ -21,7 +21,7 @@ export default function TemplateTab() {
   // --- centering & sizing ---
   const gridW = 3 * (2 * cardW + cfg.spacing.withinPair + cfg.spacing.betweenPairs)
   const gridH = 6 * (cfg.spacing.cardH + cfg.spacing.rowGap) + 100
-  const EXTRA = 350 // tweak: 240/480/600 for more/less side gutter space
+  const EXTRA = 350 // tweak gutter space
   const outerW = Math.max(900, gridW + EXTRA)
   const outerH = gridH
   const leftPad = Math.floor((outerW - gridW) / 2)
@@ -75,7 +75,9 @@ export default function TemplateTab() {
       const c = index % 6
       const pairIndex = Math.floor(c / 2)
       const inPair = c % 2
-      const x = pairIndex * (2 * cardW + withinPair + betweenPairs) + inPair * (cardW + withinPair)
+      const x =
+        pairIndex * (2 * cardW + withinPair + betweenPairs) +
+        inPair * (cardW + withinPair)
       const y = r * (cardH + rowGap)
       return { ...d, x, y }
     })
@@ -147,13 +149,16 @@ export default function TemplateTab() {
         className="relative mx-auto border border-slate-200 rounded-lg bg-slate-50 overflow-hidden"
         style={{ width: outerW, height: outerH }}
       >
-        {/* Board indicator (doesn't block drags) */}
+        {/* Board indicator (front of classroom) */}
         <div className="absolute left-0 right-0 top-2 text-center text-xs text-slate-500 pointer-events-none">
           Front of classroom
         </div>
 
         {/* Centered inner layer */}
-        <div className="absolute top-0" style={{ left: leftPad, width: gridW, height: outerH }}>
+        <div
+          className="absolute top-0"
+          style={{ left: leftPad, width: gridW, height: outerH }}
+        >
           {/* Desks */}
           {cfg.desks.map(d => (
             <Seat
@@ -169,18 +174,19 @@ export default function TemplateTab() {
             />
           ))}
 
-          {/* Fixtures */}
-          {cfg.fixtures.map(f => (
-            <Fixture
-              key={f.id}
-              id={f.id}
-              type={f.type}
-              x={f.x}
-              y={f.y}
-              onMove={(nx, ny) => moveFixture(f.id, nx, ny)}
-              onRemove={() => removeFixture(f.id)}
-            />
-          ))}
+          {/* Fixtures with rounded edges */}
+{cfg.fixtures.map(f => (
+  <Fixture
+    key={f.id}
+    id={f.id}
+    type={f.type}
+    x={f.x}
+    y={f.y}
+    onMove={(nx, ny) => moveFixture(f.id, nx, ny)}
+    onRemove={() => removeFixture(f.id)}
+  />
+))}
+
         </div>
       </div>
     </div>

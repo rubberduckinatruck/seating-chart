@@ -58,8 +58,12 @@ function plainify(value: any): any {
   return value
 }
 
+// ---------------------------
+// Cross-tab fanout helpers
+// ---------------------------
+
 // Optional BroadcastChannel to augment cross-tab fanout.
-// (Your localStorage bump already handles this; BC just makes it snappier.)
+// (The localStorage bump already handles this; BC just makes it snappier.)
 const bc: BroadcastChannel | null =
   typeof window !== 'undefined' && 'BroadcastChannel' in window
     ? new BroadcastChannel('seating-bus')
@@ -68,6 +72,22 @@ const bc: BroadcastChannel | null =
 function postBC(type: keyof typeof EVENTS, detail: any) {
   try {
     bc?.postMessage({ type, detail })
+  } catch {
+    // noop
+  }
+}
+
+// Dual-prefix bump keys for backward compatibility.
+// We write to BOTH so listeners that check either prefix will fire.
+const BUMP_KEYS = {
+  students: ['sc.bump.students', 'seating.bump.students'],
+  fixtures: ['sc.bump.fixtures', 'seating.bump.fixtures'],
+} as const
+
+function bump(keys: readonly string[]) {
+  try {
+    const ts = String(Date.now())
+    for (const k of keys) localStorage.setItem(k, ts)
   } catch {
     // noop
   }
@@ -87,12 +107,8 @@ export function broadcastStudentsUpdated(detail?: StudentsUpdatedDetail): void {
     // noop
   }
 
-  // Cross-tab (storage event bump)
-  try {
-    localStorage.setItem('seating.bump.students', String(Date.now()))
-  } catch {
-    // noop
-  }
+  // Cross-tab (storage event bump) — write both sc.* and seating.* keys
+  bump(BUMP_KEYS.students)
 
   // Cross-tab (BroadcastChannel)
   postBC('students', safe)
@@ -108,12 +124,8 @@ export function broadcastFixturesUpdated(detail: FixturesUpdatedDetail): void {
     // noop
   }
 
-  // Cross-tab (storage event bump)
-  try {
-    localStorage.setItem('seating.bump.fixtures', String(Date.now()))
-  } catch {
-    // noop
-  }
+  // Cross-tab (storage event bump) — write both sc.* and seating.* keys
+  bump(BUMP_KEYS.fixtures)
 
   // Cross-tab (BroadcastChannel)
   postBC('fixtures', safe)
