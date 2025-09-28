@@ -115,7 +115,7 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
   const gridH = 6 * (cardH + rowGap) + 100
   const EXTRA = 350
   const outerW = Math.max(900, gridW + EXTRA)
-  const outerH = gridH
+  const outerH = gridH + 40
   const leftPad = Math.floor((outerW - gridW) / 2)
 
   const studentsCfg = storage.getStudents()
