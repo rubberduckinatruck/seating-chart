@@ -366,7 +366,7 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
           {/* FRONT LABEL — grid-aligned in the top gutter (outside inner layer) */}
           <div
             className="absolute text-center text-[11px] font-medium tracking-wide text-slate-600 pointer-events-none z-20"
-          style={{ left: leftPad, width: gridW, top: 6, paddingBottom: 8 }}
+          style={{ left: leftPad, width: gridW, top: 6 }}
             aria-hidden="true"
           >
             FRONT OF CLASSROOM
