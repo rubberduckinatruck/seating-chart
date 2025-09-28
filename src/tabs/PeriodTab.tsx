@@ -115,8 +115,8 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
   const gridH = 6 * (cardH + rowGap) + 100
   const EXTRA = 350
   const outerW = Math.max(900, gridW + EXTRA)
-    const TOP_PAD = 24;           // space above row 1 for the label
-  const outerH = gridH + TOP_PAD;
+  const TOP_PAD = 24 // space above row 1 for the label
+  const outerH = gridH + TOP_PAD
 
   const leftPad = Math.floor((outerW - gridW) / 2)
 
@@ -356,53 +356,40 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
         </div>
       </div>
 
+      {/* CANVAS */}
+      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+        <div
+          id="period-canvas"
+          className="relative z-0 rounded-md border bg-slate-100 mx-auto shrink-0"
+          style={{ width: outerW, height: outerH }}
+        >
+          {/* Inner layer (shifted down for label) */}
+          <div
+            className="absolute"
+            style={{ top: TOP_PAD, left: leftPad, width: gridW, height: outerH - TOP_PAD }}
+          >
+            {/* FRONT LABEL — aligns to seating grid */}
+            <div
+              className="absolute inset-x-0 top-2 text-center text-[11px] font-medium tracking-wide text-slate-600 pointer-events-none"
+              aria-hidden="true"
+            >
+              FRONT OF CLASSROOM
+            </div>
 
-{/* UPDATED THE CODE CHUNK BELOW */}
+            {/* Fixtures (display-only on Period tab) */}
+            {template.fixtures.map(f => (
+              <Fixture
+                key={f.id}
+                id={f.id}
+                type={f.type}
+                x={f.x}
+                y={f.y}
+                editable={false}
+                onMove={() => {}}
+                onRemove={() => {}}
+              />
+            ))}
 
-      
-{/* CANVAS */}
-<DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-  <div
-    id="period-canvas"
-    className="relative z-0 rounded-md border bg-slate-100 mx-auto shrink-0"
-    style={{ width: outerW, height: outerH }}
-  >
-    {/* Inner layer (shifted down for label) */}
-    <div
-      className="absolute"
-      style={{ top: 24, left: leftPad, width: gridW, height: outerH - 24 }}
-    >
-      {/* FRONT LABEL — aligns to seating grid */}
-      <div
-        className="absolute inset-x-0 top-2 text-center text-[11px] font-medium tracking-wide text-slate-600 pointer-events-none"
-        aria-hidden="true"
-      >
-        FRONT OF CLASSROOM
-      </div>
-
-      {/* Fixtures (display-only on Period tab) */}
-      {template.fixtures.map(f => (
-        <Fixture
-          key={f.id}
-          id={f.id}
-          type={f.type}
-          x={f.x}
-          y={f.y}
-          editable={false}
-          onMove={() => {}}
-          onRemove={() => {}}
-        />
-      ))}
-
-      {/* ...Seats follow here... */}
-    </div>
-  </div>
-</DndContext>
-
-
-
-      
-      
             {/* Seats */}
             {template.desks.map(d => {
               const seatId = d.id
