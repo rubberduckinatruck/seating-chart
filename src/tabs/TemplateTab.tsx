@@ -23,7 +23,7 @@ export default function TemplateTab() {
   const gridH = 6 * (cfg.spacing.cardH + cfg.spacing.rowGap) + 100
   const EXTRA = 350 // tweak gutter space
   const outerW = Math.max(900, gridW + EXTRA)
-  const outerH = gridH
+  const outerH = gridH + 40
   const leftPad = Math.floor((outerW - gridW) / 2)
 
   // ---- Desks ----
