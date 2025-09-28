@@ -38,8 +38,7 @@ export default function PeriodSeat(props: Props) {
   // - Back row: clicking toggles exclude (multi-select friendly: no selection state)
   // - Other rows: keep existing select/swap behavior
   function handleClick() {
-    if (isBackRow) onToggleExclude()
-    else onClick()
+    onToggleExclude()
   }
 
   // Student image (id is the filename)
@@ -54,12 +53,12 @@ export default function PeriodSeat(props: Props) {
       className={[
         'absolute rounded-lg border bg-white cursor-pointer select-none transition',
         // Only show the select outline on NON-back-row seats
-        (!isBackRow && isSelected) ? 'ring-2 ring-blue-500 shadow' : 'hover:shadow',
+        'hover:shadow',
         isExcluded ? 'opacity-60' : '',
         overAndValid ? 'ring-2 ring-emerald-500 ring-offset-2' : ''
       ].join(' ')}
       style={{ left: x, top: y, width: w, height: h, padding: 8 }}
-      title={isBackRow ? 'Click to exclude/include (back row)' : 'Click to select'}
+      title="Click to exclude/include"
     >
       {/* faint X overlay when excluded */}
       {isExcluded && (
