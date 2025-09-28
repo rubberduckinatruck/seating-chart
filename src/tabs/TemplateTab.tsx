@@ -23,7 +23,8 @@ export default function TemplateTab() {
   const gridH = 6 * (cfg.spacing.cardH + cfg.spacing.rowGap) + 100
   const EXTRA = 350 // tweak gutter space
   const outerW = Math.max(900, gridW + EXTRA)
-  const outerH = gridH + 40
+  const TOP_PAD = 24;           // space above row 1 for the label
+  const outerH = gridH + TOP_PAD;
   const leftPad = Math.floor((outerW - gridW) / 2)
 
   // ---- Desks ----
@@ -144,25 +145,29 @@ export default function TemplateTab() {
         </button>
       </div>
 
-      {/* Outer canvas: wider; grid centered inside */}
-      <div
-        className="relative mx-auto border border-slate-200 rounded-lg bg-slate-50 overflow-hidden"
-        style={{ width: outerW, height: outerH }}
-      >
-
-        {/* Centered inner layer */}
-        <div
-          className="absolute top-0"
-          style={{ left: leftPad, width: gridW, height: outerH }}
-        >
-
-{/* FRONT LABEL — aligns to seating grid */}
+      
+{/* THE CHUNK BELOW WAS REPLACED */}
+      
+{/* Outer canvas: wider; grid centered inside */}
 <div
-  className="absolute inset-x-0 -top-5 text-center text-[11px] font-medium tracking-wide text-slate-600 pointer-events-none"
-  aria-hidden="true"
+  className="relative mx-auto border border-slate-200 rounded-lg bg-slate-50 overflow-hidden"
+  style={{ width: outerW, height: outerH }}
 >
-  FRONT OF CLASSROOM
-</div>
+  {/* Centered inner layer (shifted down for label) */}
+  <div
+    className="absolute"
+    style={{ top: 24, left: leftPad, width: gridW, height: outerH - 24 }}
+  >
+    {/* FRONT LABEL — aligns to seating grid */}
+    <div
+      className="absolute inset-x-0 top-2 text-center text-[11px] font-medium tracking-wide text-slate-600 pointer-events-none"
+      aria-hidden="true"
+    >
+      FRONT OF CLASSROOM
+    </div>
+
+    {/* ...keep Desks/Fixtures below... */}
+
 
 
           
