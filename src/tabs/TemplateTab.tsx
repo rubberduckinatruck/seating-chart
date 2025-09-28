@@ -23,7 +23,7 @@ export default function TemplateTab() {
   const gridH = 6 * (cfg.spacing.cardH + cfg.spacing.rowGap) + 100
   const EXTRA = 350 // tweak gutter space
   const outerW = Math.max(900, gridW + EXTRA)
-  const TOP_PAD = 24;           // space above row 1 for the label
+  const TOP_PAD = 40;           // space above row 1 for the label
   const outerH = gridH + TOP_PAD;
   const leftPad = Math.floor((outerW - gridW) / 2)
 
