@@ -115,7 +115,7 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
   const gridH = 6 * (cardH + rowGap) + 100
   const EXTRA = 350
   const outerW = Math.max(900, gridW + EXTRA)
-  const TOP_PAD = 24 // space above row 1 for the label
+  const TOP_PAD = 48 // space above row 1 for the label
   const outerH = gridH + TOP_PAD
 
   const leftPad = Math.floor((outerW - gridW) / 2)
