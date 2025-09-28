@@ -20,12 +20,13 @@ export default function TemplateTab() {
 
   // --- centering & sizing ---
   const gridW = 3 * (2 * cardW + cfg.spacing.withinPair + cfg.spacing.betweenPairs)
-  const gridH = 6 * (cfg.spacing.cardH + cfg.spacing.rowGap) + 100
-  const EXTRA = 350 // tweak gutter space
-  const outerW = Math.max(900, gridW + EXTRA)
-  const TOP_PAD = 40;           // space above row 1 for the label
-  const outerH = gridH + TOP_PAD;
-  const leftPad = Math.floor((outerW - gridW) / 2)
+const gridH = 6 * (cfg.spacing.cardH + cfg.spacing.rowGap) + 100
+const EXTRA = 350 // tweak gutter space
+const outerW = Math.max(900, gridW + EXTRA)
+const TOP_PAD = 24 // space above row 1 for the label
+const outerH = gridH + TOP_PAD
+const leftPad = Math.floor((outerW - gridW) / 2)
+
 
   // ---- Desks ----
   function moveDesk(id: string, nx: number, ny: number) {
@@ -147,60 +148,55 @@ export default function TemplateTab() {
 
       
 {/* THE CHUNK BELOW WAS REPLACED */}
-      
 {/* Outer canvas: wider; grid centered inside */}
 <div
   className="relative mx-auto border border-slate-200 rounded-lg bg-slate-50 overflow-hidden"
   style={{ width: outerW, height: outerH }}
 >
-  {/* Centered inner layer (shifted down for label) */}
+  {/* FRONT LABEL — grid-aligned in the top gutter (outside inner layer) */}
+  <div
+    className="absolute text-center text-[11px] font-medium tracking-wide text-slate-600 pointer-events-none z-20"
+    style={{ left: leftPad, width: gridW, top: 6 }}
+    aria-hidden="true"
+  >
+    FRONT OF CLASSROOM
+  </div>
+
+  {/* Centered inner layer (shifted down by TOP_PAD) */}
   <div
     className="absolute"
-    style={{ top: 24, left: leftPad, width: gridW, height: outerH - 24 }}
+    style={{ top: TOP_PAD, left: leftPad, width: gridW, height: outerH - TOP_PAD }}
   >
-    {/* FRONT LABEL — aligns to seating grid */}
-    <div
-      className="absolute inset-x-0 top-2 text-center text-[11px] font-medium tracking-wide text-slate-600 pointer-events-none"
-      aria-hidden="true"
-    >
-      FRONT OF CLASSROOM
-    </div>
+    {/* Desks */}
+    {cfg.desks.map(d => (
+      <Seat
+        key={d.id}
+        id={d.id}
+        x={d.x}
+        y={d.y}
+        w={cfg.spacing.cardW}
+        h={cfg.spacing.cardH}
+        tags={d.tags}
+        onMove={(nx, ny) => moveDesk(d.id, nx, ny)}
+        onToggleTag={(tag) => toggleDeskTag(d.id, tag)}
+      />
+    ))}
 
-    {/* ...keep Desks/Fixtures below... */}
+    {/* Fixtures */}
+    {cfg.fixtures.map(f => (
+      <Fixture
+        key={f.id}
+        id={f.id}
+        type={f.type}
+        x={f.x}
+        y={f.y}
+        onMove={(nx, ny) => moveFixture(f.id, nx, ny)}
+        onRemove={() => removeFixture(f.id)}
+      />
+    ))}
+  </div>
+</div>
 
-
-
-          
-          {/* Desks */}
-          {cfg.desks.map(d => (
-            <Seat
-              key={d.id}
-              id={d.id}
-              x={d.x}
-              y={d.y}
-              w={cfg.spacing.cardW}
-              h={cfg.spacing.cardH}
-              tags={d.tags}
-              onMove={(nx, ny) => moveDesk(d.id, nx, ny)}
-              onToggleTag={(tag) => toggleDeskTag(d.id, tag)}
-            />
-          ))}
-
-          {/* Fixtures with rounded edges */}
-{cfg.fixtures.map(f => (
-  <Fixture
-    key={f.id}
-    id={f.id}
-    type={f.type}
-    x={f.x}
-    y={f.y}
-    onMove={(nx, ny) => moveFixture(f.id, nx, ny)}
-    onRemove={() => removeFixture(f.id)}
-  />
-))}
-
-        </div>
-      </div>
     </div>
   )
 }
