@@ -357,83 +357,67 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
       </div>
 
       {/* CANVAS */}
-      <div
-  id="period-canvas"
-  className="relative z-0 rounded-md border bg-slate-100 mx-auto shrink-0"
-  style={{ width: outerW, height: outerH }}
->
-  {/* FRONT LABEL — grid-aligned in the top gutter (outside inner layer) */}
-  <div
-    className="absolute text-center text-[11px] font-medium tracking-wide text-slate-600 pointer-events-none z-20"
-    style={{ left: leftPad, width: gridW, top: 6 }}
-    aria-hidden="true"
-  >
-    FRONT OF CLASSROOM
-  </div>
+      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+        <div
+          id="period-canvas"
+          className="relative z-0 rounded-md border bg-slate-100 mx-auto shrink-0"
+          style={{ width: outerW, height: outerH }}
+        >
+          {/* FRONT LABEL — grid-aligned in the top gutter (outside inner layer) */}
+          <div
+            className="absolute text-center text-[11px] font-medium tracking-wide text-slate-600 pointer-events-none z-20"
+            style={{ left: leftPad, width: gridW, top: 6 }}
+            aria-hidden="true"
+          >
+            FRONT OF CLASSROOM
+          </div>
 
-  {/* Inner layer (shifted down for label) */}
-  <div
-    className="absolute"
-    style={{ top: TOP_PAD, left: leftPad, width: gridW, height: outerH - TOP_PAD }}
-  >
-    {/* Fixtures (display-only on Period tab) */}
-    {template.fixtures.map(f => (
-      <Fixture
-        key={f.id}
-        id={f.id}
-        type={f.type}
-        x={f.x}
-        y={f.y}
-        editable={false}
-        onMove={() => {}}
-        onRemove={() => {}}
-      />
-    ))}
+          {/* Inner layer (shifted down for label) */}
+          <div
+            className="absolute"
+            style={{ top: TOP_PAD, left: leftPad, width: gridW, height: outerH - TOP_PAD }}
+          >
+            {/* Fixtures (display-only on Period tab) */}
+            {template.fixtures.map(f => (
+              <Fixture
+                key={f.id}
+                id={f.id}
+                type={f.type}
+                x={f.x}
+                y={f.y}
+                editable={false}
+                onMove={() => {}}
+                onRemove={() => {}}
+              />
+            ))}
 
-    {/* Seats */}
-    {template.desks.map(d => {
-      const seatId = d.id
-      const studentId = assignments[seatId] ?? null
-      const s = studentId ? students.find(x => x.id === studentId) || null : null
-      const name = s ? getDisplayName(s) : null
-      return (
-        <PeriodSeat
-          key={seatId}
-          periodId={periodId}
-          seatId={seatId}
-          x={d.x}
-          y={d.y}
-          w={cardW}
-          h={cardH}
-          tags={d.tags}
-          isExcluded={excluded.has(seatId)}
-          isSelected={selectedSeat === seatId}
-          studentId={studentId}
-          studentName={name}
-          onClick={() => onSeatClick(seatId)}
-          onToggleExclude={() => toggleExcluded(seatId)}
-        />
-      )
-    })}
-  </div>
-</div>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-      
+            {/* Seats */}
+            {template.desks.map(d => {
+              const seatId = d.id
+              const studentId = assignments[seatId] ?? null
+              const s = studentId ? students.find(x => x.id === studentId) || null : null
+              const name = s ? getDisplayName(s) : null
+              return (
+                <PeriodSeat
+                  key={seatId}
+                  periodId={periodId}
+                  seatId={seatId}
+                  x={d.x}
+                  y={d.y}
+                  w={cardW}
+                  h={cardH}
+                  tags={d.tags}
+                  isExcluded={excluded.has(seatId)}
+                  isSelected={selectedSeat === seatId}
+                  studentId={studentId}
+                  studentName={name}
+                  onClick={() => onSeatClick(seatId)}
+                  onToggleExclude={() => toggleExcluded(seatId)}
+                />
+              )
+            })}
+          </div>
+        </div>
 
         <DragOverlay>
           {dragStudent ? (
