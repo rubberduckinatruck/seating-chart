@@ -149,16 +149,23 @@ export default function TemplateTab() {
         className="relative mx-auto border border-slate-200 rounded-lg bg-slate-50 overflow-hidden"
         style={{ width: outerW, height: outerH }}
       >
-        {/* Board indicator (front of classroom) */}
-        <div className="absolute left-0 right-0 top-2 text-center text-xs text-slate-500 pointer-events-none">
-          Front of classroom
-        </div>
 
         {/* Centered inner layer */}
         <div
           className="absolute top-0"
           style={{ left: leftPad, width: gridW, height: outerH }}
         >
+
+{/* FRONT LABEL — aligns to seating grid */}
+<div
+  className="absolute inset-x-0 -top-5 text-center text-[11px] font-medium tracking-wide text-slate-600 pointer-events-none"
+  aria-hidden="true"
+>
+  FRONT OF CLASSROOM
+</div>
+
+
+          
           {/* Desks */}
           {cfg.desks.map(d => (
             <Seat
