@@ -135,14 +135,12 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
   const [rules, setRules] = useState<{ together: [string, string][], apart: [string, string][] }>(
     () => buildRulesForPeriod(rulesCfg, periodId)
   )
-  const [selectedSeat, setSelectedSeat] = useState<string | null>(null)
 
   // re-hydrate when periodId changes
   useEffect(() => {
     setAssignments(buildAssignmentsForPeriod(template, assignCfg, periodId))
     setExcluded(buildExcludedForPeriod(excludedMap, periodId))
     setRules(buildRulesForPeriod(rulesCfg, periodId))
-    setSelectedSeat(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodId])
 
@@ -180,7 +178,6 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
     const next = buildBlankAssignments(template)
     setAssignments(next)
     persistAssignments(next)
-    setSelectedSeat(null)
   }
   function sortAlpha() {
     const next = alphaAssign(template, students, excluded)
@@ -188,17 +185,6 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
     persistAssignments(next)
   }
 
-  // seat interactions: click-to-swap
-  function onSeatClick(seatId: string) {
-    if (selectedSeat === null) { setSelectedSeat(seatId); return }
-    if (selectedSeat === seatId) { setSelectedSeat(null); return }
-    const a = assignments[selectedSeat] ?? null
-    const b = assignments[seatId] ?? null
-    const next = { ...assignments, [selectedSeat]: b, [seatId]: a }
-    setAssignments(next)
-    persistAssignments(next)
-    setSelectedSeat(null)
-  }
   function toggleExcluded(seatId: string) {
     const next = new Set(excluded)
     if (next.has(seatId)) next.delete(seatId)
@@ -408,10 +394,8 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
                   h={cardH}
                   tags={d.tags}
                   isExcluded={excluded.has(seatId)}
-                  isSelected={selectedSeat === seatId}
                   studentId={studentId}
                   studentName={name}
-                  onClick={() => onSeatClick(seatId)}
                   onToggleExclude={() => toggleExcluded(seatId)}
                 />
               )
