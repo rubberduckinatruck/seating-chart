@@ -20,16 +20,25 @@ export default function TemplateTab() {
 
   // --- centering & sizing ---
   const gridW = 3 * (2 * cardW + cfg.spacing.withinPair + cfg.spacing.betweenPairs)
-  const gridH = 6 * (cfg.spacing.cardH + cfg.spacing.rowGap) + 100
-  const EXTRA = 350 // tweak gutter space
-  const outerW = Math.max(900, gridW + EXTRA)
-  const TOP_PAD = 48 // space above row 1 for the label
-  const outerH = gridH + TOP_PAD
+
+  // Auto-size height to reveal all desks below the baseline 6 rows
+  const maxYDesk = cfg.desks.length
+    ? cfg.desks.reduce((m, d) => Math.max(m, d.y), 0)
+    : 0
+
+  const baselineH = 6 * (cfg.spacing.cardH + cfg.spacing.rowGap) + 100
+  const extentH   = maxYDesk + cfg.spacing.cardH + 50 // lowest desk + its height + padding
+  const gridH     = Math.max(baselineH, extentH)
+
+  const EXTRA   = 350 // tweak gutter space
+  const outerW  = Math.max(900, gridW + EXTRA)
+  const TOP_PAD = 48  // space above row 1 for the label
+  const outerH  = gridH + TOP_PAD
   const leftPad = Math.floor((outerW - gridW) / 2)
 
   // ---- Desks ----
   function moveDesk(id: string, nx: number, ny: number) {
-    // (nx, ny) here are the stored coordinates (no TOP_PAD)
+    // (nx, ny) are stored coordinates (no TOP_PAD)
     const meIdx = cfg.desks.findIndex(d => d.id === id)
     const myRect: Rect = { x: nx, y: ny, w: cardW, h: cardH }
     const collide = cfg.desks.some((d, i) =>
@@ -53,9 +62,13 @@ export default function TemplateTab() {
     }))
   }
 
+  function removeDesk(id: string) {
+    setCfg(prev => ({ ...prev, desks: prev.desks.filter(d => d.id !== id) }))
+  }
+
   // ---- Fixtures ----
   function moveFixture(id: string, nx: number, ny: number) {
-    // (nx, ny) here are stored coordinates (no TOP_PAD)
+    // (nx, ny) are stored coordinates (no TOP_PAD)
     setCfg(prev => ({
       ...prev,
       fixtures: prev.fixtures.map(f => (f.id === id ? { ...f, x: nx, y: ny } : f)),
@@ -205,20 +218,38 @@ export default function TemplateTab() {
           className="absolute"
           style={{ top: 0, left: leftPad, width: gridW, height: outerH }}
         >
-          {/* Desks (render with TOP_PAD offset; subtract on move) */}
-          {cfg.desks.map(d => (
-            <Seat
-              key={d.id}
-              id={d.id}
-              x={d.x}
-              y={d.y + TOP_PAD}
-              w={cfg.spacing.cardW}
-              h={cfg.spacing.cardH}
-              tags={d.tags}
-              onMove={(nx, ny) => moveDesk(d.id, nx, ny - TOP_PAD)}
-              onToggleTag={(tag) => toggleDeskTag(d.id, tag)}
-            />
-          ))}
+          {/* Desks (render with TOP_PAD offset; subtract on move) + delete button for added seats */}
+          {cfg.desks.map(d => {
+            const n = Number(String(d.id).replace(/^d/, ''))
+            const isAdded = Number.isFinite(n) && n > 36 // treat d37+ as "added/extra"
+
+            return (
+              <div key={d.id}>
+                <Seat
+                  id={d.id}
+                  x={d.x}
+                  y={d.y + TOP_PAD}
+                  w={cfg.spacing.cardW}
+                  h={cfg.spacing.cardH}
+                  tags={d.tags}
+                  onMove={(nx, ny) => moveDesk(d.id, nx, ny - TOP_PAD)}
+                  onToggleTag={(tag) => toggleDeskTag(d.id, tag)}
+                />
+
+                {isAdded && (
+                  <button
+                    type="button"
+                    className="absolute -translate-x-1/2 -translate-y-1/2 h-5 w-5 rounded-full bg-white border border-slate-300 text-xs leading-5 text-slate-700 hover:bg-slate-50"
+                    style={{ left: d.x + cfg.spacing.cardW - 6, top: d.y + TOP_PAD + 6 }}
+                    title="Remove this added seat"
+                    onClick={() => removeDesk(d.id)}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            )
+          })}
 
           {/* Fixtures (also offset to match seats) */}
           {cfg.fixtures.map(f => (
