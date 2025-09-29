@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+// src/tabs/StudentsTab.tsx
+import { useEffect, useRef, useState } from 'react'
 import { PERIODS, type PeriodId } from '../lib/constants'
 import type { StudentsConfig, StudentMeta } from '../lib/types'
 import { storage } from '../lib/storage'
@@ -9,7 +10,11 @@ import { broadcastStudentsUpdated } from '../lib/broadcast'
 const ALLOWED_TAGS = ['front row', 'back row', 'near TB'] as const
 type AllowedTag = typeof ALLOWED_TAGS[number]
 
-// ✅ Ensure the object always has arrays for all periods
+/* -----------------------------------------------------------------------------
+   Helpers
+----------------------------------------------------------------------------- */
+
+// Ensure the object always has arrays for all periods
 function ensureStudentsShape(input: any): StudentsConfig {
   const base: StudentsConfig = { p1: [], p3: [], p4: [], p5: [], p6: [] }
   if (!input || typeof input !== 'object') return base
@@ -19,6 +24,73 @@ function ensureStudentsShape(input: any): StudentsConfig {
   }
   return out
 }
+
+/** Add one student to a period's roster, no reshuffle */
+function addStudentToPeriod(periodId: PeriodId, meta: StudentMeta) {
+  const studentsCfg = storage.getStudents()
+  const list = studentsCfg[periodId] || []
+
+  // avoid duplicates by id
+  if (list.some(s => s.id === meta.id)) return
+
+  const nextCfg: StudentsConfig = { ...studentsCfg, [periodId]: [...list, meta] }
+  storage.setStudents(nextCfg)
+
+  // nudge other tabs to refresh
+  try { localStorage.setItem('sc.bump.students', String(Date.now())) } catch {}
+  try { localStorage.setItem('seating.bump.students', String(Date.now())) } catch {}
+
+  // local broadcast
+  broadcastStudentsUpdated()
+}
+
+/* Tiny, stateless field components for the Add Student form */
+function PeriodPicker() {
+  return (
+    <div>
+      <label htmlFor="add-period" className="block text-xs text-slate-500 mb-1">Period</label>
+      <select id="add-period" defaultValue="p3" className="rounded-md border px-2 py-1.5 text-sm">
+        {PERIODS.map(p => <option key={p} value={p}>{p.toUpperCase()}</option>)}
+      </select>
+    </div>
+  )
+}
+function NameField() {
+  return (
+    <div>
+      <label htmlFor="add-name" className="block text-xs text-slate-500 mb-1">Student name</label>
+      <input id="add-name" defaultValue="Jane Doe" className="w-44 rounded-md border px-2 py-1.5 text-sm" />
+    </div>
+  )
+}
+function FileIdField() {
+  return (
+    <div>
+      <label htmlFor="add-fileid" className="block text-xs text-slate-500 mb-1">Photo filename (id)</label>
+      <input id="add-fileid" defaultValue="Jane_Doe.png" className="w-56 rounded-md border px-2 py-1.5 text-sm" />
+    </div>
+  )
+}
+function DisplayNameField() {
+  return (
+    <div>
+      <label htmlFor="add-display" className="block text-xs text-slate-500 mb-1">Display name (optional)</label>
+      <input id="add-display" placeholder="Jane D." className="w-44 rounded-md border px-2 py-1.5 text-sm" />
+    </div>
+  )
+}
+function TagsField() {
+  return (
+    <div>
+      <label htmlFor="add-tags" className="block text-xs text-slate-500 mb-1">Tags (optional)</label>
+      <input id="add-tags" placeholder="back row, near TB" className="w-44 rounded-md border px-2 py-1.5 text-sm" />
+    </div>
+  )
+}
+
+/* -----------------------------------------------------------------------------
+   Component
+----------------------------------------------------------------------------- */
 
 export default function StudentsTab() {
   const [cfg, setCfg] = useState<StudentsConfig>(() => ensureStudentsShape(storage.getStudents()))
@@ -41,7 +113,6 @@ export default function StudentsTab() {
       if (!e.key || !e.key.startsWith('seating.')) return
       setCfg(ensureStudentsShape(storage.getStudents()))
     }
-    // use unified event name that the rest of the app listens for
     window.addEventListener('seating:students-updated', onUpdate as EventListener)
     window.addEventListener('storage', onStorage)
     return () => {
@@ -67,7 +138,6 @@ export default function StudentsTab() {
     } catch {
       // leave any errors to existing console warnings inside sync
     } finally {
-      // small delay so the bar can reach 100% visibly
       setTimeout(() => {
         setIsSyncing(false)
         setSyncPct(0)
@@ -88,14 +158,17 @@ export default function StudentsTab() {
     if (displayName !== undefined && displayName.trim() === curr.name.trim()) {
       displayName = undefined
     }
-    list[idx] = { ...curr, ...patch, ...(displayName !== undefined ? { displayName } : { displayName: undefined }) }
+    list[idx] = {
+      ...curr,
+      ...patch,
+      ...(displayName !== undefined ? { displayName } : { displayName: undefined })
+    }
+
     storage.setStudents(next)
     setCfg(ensureStudentsShape(next))
     // broadcast after every write so other views refresh
     broadcastStudentsUpdated()
   }
-
-  const periods = useMemo(() => PERIODS, [])
 
   const filterLc = filter.trim().toLowerCase()
   const matches = (s: StudentMeta) =>
@@ -110,15 +183,6 @@ export default function StudentsTab() {
 
   // ----- Export / Import roster (backup/restore) -----
   const fileRef = useRef<HTMLInputElement>(null)
-
-  function coerceIncomingStudents(json: any): StudentsConfig {
-    const maybe = json?.periods ?? json
-    const result: StudentsConfig = { ...maybe }
-    for (const p of PERIODS) {
-      if (!Array.isArray(result[p])) result[p] = []
-    }
-    return result
-  }
 
   function mergeStudents(existing: StudentsConfig, incoming: StudentsConfig): StudentsConfig {
     const out: StudentsConfig = { ...existing }
@@ -150,10 +214,15 @@ export default function StudentsTab() {
     try {
       const text = await file.text()
       const json = JSON.parse(text)
-      const incoming = coerceIncomingStudents(json)
+
+      // Use ensureStudentsShape on json.periods (preferred) or json
+      const incoming = ensureStudentsShape(json?.periods ?? json)
       const replace = confirm('Replace ALL existing students with the imported file?\n\nClick "Cancel" to MERGE instead.')
 
-      const next = replace ? incoming : mergeStudents(ensureStudentsShape(storage.getStudents()), incoming)
+      const next = replace
+        ? incoming
+        : mergeStudents(ensureStudentsShape(storage.getStudents()), incoming)
+
       storage.setStudents(next)
       setCfg(ensureStudentsShape(next))
       broadcastStudentsUpdated()
@@ -183,6 +252,7 @@ export default function StudentsTab() {
 
   return (
     <div className="space-y-4">
+      {/* Header toolbar */}
       <div className="flex items-center gap-2">
         <h2 className="text-lg font-semibold">Students (Global)</h2>
         <button
@@ -276,11 +346,46 @@ export default function StudentsTab() {
         </div>
       </div>
 
-      {periods.map((p) => {
-        const raw = Array.isArray(cfg[p]) ? cfg[p] : []                           // ✅ guard
-        const list = raw.slice().sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b))).filter(matches)
+      {/* Add one student (simple form) */}
+      <div className="p-2 border rounded-md flex flex-wrap items-end gap-2">
+        <PeriodPicker />
+        <NameField />
+        <FileIdField />
+        <DisplayNameField />
+        <TagsField />
+        <button
+          type="button"
+          className="ml-2 px-3 py-1.5 text-sm rounded-md border bg-white hover:bg-slate-50"
+          onClick={() => {
+            const period = (document.getElementById('add-period') as HTMLSelectElement)?.value as PeriodId
+            const name = (document.getElementById('add-name') as HTMLInputElement)?.value.trim()
+            const id = (document.getElementById('add-fileid') as HTMLInputElement)?.value.trim()
+            const displayName = (document.getElementById('add-display') as HTMLInputElement)?.value.trim()
+            const tagsStr = (document.getElementById('add-tags') as HTMLInputElement)?.value.trim()
+            if (!period || !name || !id) return
+            const meta: StudentMeta = {
+              id,
+              name,
+              ...(displayName ? { displayName } : {}),
+              tags: tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [],
+            }
+            addStudentToPeriod(period, meta)
+          }}
+          title="Append a student to the selected period"
+        >
+          Add student
+        </button>
+      </div>
+
+      {/* Period lists */}
+      {PERIODS.map((p) => {
+        const raw = Array.isArray(cfg[p]) ? cfg[p] : [] // guard
+        const list = raw
+          .slice()
+          .sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b)))
+          .filter(matches)
         const isCollapsed = collapsed[p]
-        const totalCount = raw.length                                             // keep header count semantics
+        const totalCount = raw.length
         return (
           <div key={p} className="rounded-lg border border-slate-200 bg-white">
             <div className="px-3 py-2 border-b border-slate-200 text-sm font-medium flex items-center">
@@ -293,13 +398,6 @@ export default function StudentsTab() {
                 {isCollapsed ? '▶' : '▼'}
               </button>
               <span className="mr-2">{p.toUpperCase()} — {totalCount} students</span>
-              <button
-                className="ml-auto text-xs text-slate-600 hover:text-slate-900"
-                onClick={() => setCollapsed(prev => ({ ...prev, [p]: !prev[p] }))}
-                disabled={isSyncing}
-              >
-                {isCollapsed ? 'Expand' : 'Collapse'}
-              </button>
             </div>
 
             {!isCollapsed && (
@@ -307,7 +405,7 @@ export default function StudentsTab() {
                 {/* Header row */}
                 <div className="grid grid-cols-12 gap-2 px-2 text-xs text-slate-500">
                   <div className="col-span-3">Display Name</div>
-                  <div className="col-span-3">File Name</div>
+                  <div className="col-span-3">Photo Filename (id)</div>
                   <div className="col-span-3">Tags</div>
                   <div className="col-span-3">Notes</div>
                 </div>
@@ -328,6 +426,10 @@ export default function StudentsTab() {
     </div>
   )
 }
+
+/* -----------------------------------------------------------------------------
+   Row Component
+----------------------------------------------------------------------------- */
 
 function Row({
   period,
@@ -363,11 +465,11 @@ function Row({
         />
       </div>
 
-      {/* File Name (read-only) */}
+      {/* Photo Filename (read-only id) */}
       <div className="col-span-3">
         <input
           className="w-full rounded-md border border-slate-200 bg-slate-100/60 px-2 py-1.5 text-sm text-slate-700"
-          value={student.name}
+          value={student.id}
           readOnly
           aria-readonly
           tabIndex={-1}
