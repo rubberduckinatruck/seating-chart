@@ -87,24 +87,33 @@ export default function TemplateTab() {
 
   // ---- Add one seat helper ----
   function addDesk() {
-    const { cardH, rowGap } = cfg.spacing
-    // compute next id
-    const nextNum = cfg.desks
-      .map(d => Number(d.id.replace(/^d/, '')))
-      .reduce((max, n) => (Number.isFinite(n) ? Math.max(max, n) : max), 0) + 1
-    const nextId = `d${nextNum}`
+  const { cardW, cardH, withinPair, betweenPairs, rowGap } = cfg.spacing
 
-    // place new desk in a sensible spot:
-    // start a new row under the lowest existing desk
-    const maxY = cfg.desks.reduce((m, d) => Math.max(m, d.y), 0)
-    const y = cfg.desks.length ? maxY + cardH + rowGap : 0
-    const x = 0
+  // Next id: d##
+  const nextNum = cfg.desks
+    .map(d => Number(d.id.replace(/^d/, '')))
+    .reduce((max, n) => (Number.isFinite(n) ? Math.max(max, n) : max), 0) + 1
+  const nextId = `d${nextNum}`
 
-    setCfg(prev => ({
-      ...prev,
-      desks: [...prev.desks, { id: nextId, x, y, tags: [] }],
-    }))
-  }
+  // New row Y (one row below the lowest existing y)
+  const hasAny = cfg.desks.length > 0
+  const maxY = hasAny ? cfg.desks.reduce((m, d) => Math.max(m, d.y), 0) : 0
+  const y = hasAny ? (maxY + cardH + rowGap) : 0
+
+  // Last column (c = 5) X using your grid math
+  const c = 5
+  const pairIndex = Math.floor(c / 2) // 0..2
+  const inPair = c % 2               // 0 or 1
+  const x =
+    pairIndex * (2 * cardW + withinPair + betweenPairs) +
+    inPair * (cardW + withinPair)
+
+  setCfg(prev => ({
+    ...prev,
+    desks: [...prev.desks, { id: nextId, x, y, tags: [] }],
+  }))
+}
+
 
   return (
     <div className="space-y-4">
