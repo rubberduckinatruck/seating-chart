@@ -1,5 +1,5 @@
 // src/tabs/PeriodTab.tsx
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { PeriodId } from '../lib/constants'
 import { storage } from '../lib/storage'
@@ -110,25 +110,24 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
   const template = storage.getTemplate() as TemplateConfig
   const { cardW, cardH, withinPair, betweenPairs, rowGap } = template.spacing
 
-// replicate TemplateTab sizing math (auto-grow height)
-const gridW = 3 * (2 * cardW + withinPair + betweenPairs)
+  // replicate TemplateTab sizing math (auto-grow height)
+  const gridW = 3 * (2 * cardW + withinPair + betweenPairs)
 
-// Baseline height for 6 rows, OR big enough to include the lowest desk
-const maxYDesk = template.desks.length
-  ? template.desks.reduce((m, d) => Math.max(m, d.y), 0)
-  : 0
+  // Baseline height for 6 rows, OR big enough to include the lowest desk
+  const maxYDesk = template.desks.length
+    ? template.desks.reduce((m, d) => Math.max(m, d.y), 0)
+    : 0
 
-const baselineH = 6 * (cardH + rowGap) + 100
-const extentH   = maxYDesk + cardH + 50  // lowest desk + its height + padding
-const gridH     = Math.max(baselineH, extentH)
+  const baselineH = 6 * (cardH + rowGap) + 100
+  const extentH   = maxYDesk + cardH + 50  // lowest desk + its height + padding
+  const gridH     = Math.max(baselineH, extentH)
 
-const EXTRA   = 350
-const outerW  = Math.max(900, gridW + EXTRA)
-const TOP_PAD = 48            // space above row 1 for the label
-const outerH  = gridH + TOP_PAD
+  const EXTRA   = 350
+  const outerW  = Math.max(900, gridW + EXTRA)
+  const TOP_PAD = 48            // space above row 1 for the label
+  const outerH  = gridH + TOP_PAD
 
-const leftPad = Math.floor((outerW - gridW) / 2)
-
+  const leftPad = Math.floor((outerW - gridW) / 2)
 
   const studentsCfg = storage.getStudents()
   const rulesCfg = storage.getRules()
@@ -156,6 +155,15 @@ const leftPad = Math.floor((outerW - gridW) / 2)
 
   const students: StudentMeta[] = studentsCfg[periodId] || []
   const periodLabel = `Period ${periodId.slice(1)}`
+
+  // --- compute "unseated" list for this period ---
+  const unseated = useMemo(() => {
+    const seatedIds = new Set(
+      Object.values(assignments).filter((v): v is string => !!v)
+    )
+    const all = studentsCfg[periodId] || []
+    return all.filter(s => !seatedIds.has(s.id))
+  }, [assignments, studentsCfg, periodId])
 
   // persistence helpers
   function persistAssignments(next: Record<string, string | null>) {
@@ -201,6 +209,21 @@ const leftPad = Math.floor((outerW - gridW) / 2)
     else next.add(seatId)
     setExcluded(next)
     persistExcluded(next)
+  }
+
+  // --- seat one unseated student into first available open seat ---
+  function seatStudent(studentId: string) {
+    const targetSeat = template.desks
+      .map(d => d.id)
+      .find(id => !excluded.has(id) && (assignments[id] ?? null) === null)
+
+    if (!targetSeat) {
+      alert('No open (non-excluded) seat available.')
+      return
+    }
+    const next = { ...assignments, [targetSeat]: studentId }
+    setAssignments(next)
+    persistAssignments(next)
   }
 
   // ----- DnD (mouse-only) -----
@@ -315,6 +338,48 @@ const leftPad = Math.floor((outerW - gridW) / 2)
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          {/* Unseated dropdown */}
+          <div className="relative" data-open="false">
+            <button
+              type="button"
+              className="px-2 py-1 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50"
+              onClick={(e) => {
+                const p = (e.currentTarget.parentElement as HTMLElement)
+                const open = p.getAttribute('data-open') === 'true'
+                p.setAttribute('data-open', open ? 'false' : 'true')
+              }}
+              aria-haspopup="menu"
+              title="Students in this period who are not yet seated"
+            >
+              Add student ▾
+            </button>
+            <div
+              className="absolute right-0 z-50 mt-2 min-w-56 rounded-lg border bg-white p-1 shadow max-h-72 overflow-auto"
+              hidden
+            >
+              {unseated.length === 0 ? (
+                <div className="px-2 py-1 text-sm text-slate-500">All students are seated</div>
+              ) : (
+                unseated.map(s => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    className="w-full text-left px-2 py-1 text-sm rounded hover:bg-slate-50"
+                    onClick={(e) => {
+                      seatStudent(s.id)
+                      const box = (e.currentTarget.closest('[data-open]') as HTMLElement)
+                      if (box) box.setAttribute('data-open', 'false')
+                    }}
+                  >
+                    {getDisplayName(s)}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+          {/* scriptless toggle to show the dropdown */}
+          <style>{`[data-open="true"] > div[hidden]{display:block;}`}</style>
+
           {/* Layout dropdown */}
           <div className="relative" ref={layoutRef}>
             <button
@@ -362,7 +427,7 @@ const leftPad = Math.floor((outerW - gridW) / 2)
           {/* FRONT LABEL — grid-aligned in the top gutter (outside inner layer) */}
           <div
             className="absolute text-center text-[11px] font-medium tracking-wide text-slate-600 pointer-events-none z-20"
-          style={{ left: leftPad, width: gridW, top: 6 }}
+            style={{ left: leftPad, width: gridW, top: 6 }}
             aria-hidden="true"
           >
             FRONT OF CLASSROOM
