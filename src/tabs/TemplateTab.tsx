@@ -10,7 +10,7 @@ import { intersects, type Rect } from '../lib/drag'
 export default function TemplateTab() {
   const [cfg, setCfg] = useState<TemplateConfig>(() => storage.getTemplate())
 
-  // persist template changes (desks + fixtures + spacing all included)
+  // Persist template changes (desks + fixtures + spacing all included)
   useEffect(() => {
     storage.setTemplate(cfg)
   }, [cfg])
@@ -29,7 +29,7 @@ export default function TemplateTab() {
 
   // ---- Desks ----
   function moveDesk(id: string, nx: number, ny: number) {
-    // ny passed from Seat includes TOP_PAD visually; store without it
+    // (nx, ny) here are the stored coordinates (no TOP_PAD)
     const meIdx = cfg.desks.findIndex(d => d.id === id)
     const myRect: Rect = { x: nx, y: ny, w: cardW, h: cardH }
     const collide = cfg.desks.some((d, i) =>
@@ -55,6 +55,7 @@ export default function TemplateTab() {
 
   // ---- Fixtures ----
   function moveFixture(id: string, nx: number, ny: number) {
+    // (nx, ny) here are stored coordinates (no TOP_PAD)
     setCfg(prev => ({
       ...prev,
       fixtures: prev.fixtures.map(f => (f.id === id ? { ...f, x: nx, y: ny } : f)),
@@ -86,35 +87,34 @@ export default function TemplateTab() {
     setCfg(prev => ({ ...prev, desks }))
   }
 
-  // ---- Add one seat (bottom-right of a NEW last row) ----
-function addDesk() {
-  const { cardW, withinPair, betweenPairs } = cfg.spacing
+  // ---- Add one seat (bottom-right of the EXISTING last row) ----
+  function addDesk() {
+    const { cardW, withinPair, betweenPairs } = cfg.spacing
 
-  // Next id: d##
-  const nextNum = cfg.desks
-    .map(d => Number(d.id.replace(/^d/, '')))
-    .reduce((max, n) => (Number.isFinite(n) ? Math.max(max, n) : max), 0) + 1
-  const nextId = `d${nextNum}`
+    // Next id: d##
+    const nextNum = cfg.desks
+      .map(d => Number(d.id.replace(/^d/, '')))
+      .reduce((max, n) => (Number.isFinite(n) ? Math.max(max, n) : max), 0) + 1
+    const nextId = `d${nextNum}`
 
-  // Use the EXISTING last row's Y (do NOT create a new row)
-  const hasAny = cfg.desks.length > 0
-  const maxY = hasAny ? cfg.desks.reduce((m, d) => Math.max(m, d.y), 0) : 0
-  const y = maxY
+    // Use EXISTING last row (do not create a new one)
+    const hasAny = cfg.desks.length > 0
+    const maxY = hasAny ? cfg.desks.reduce((m, d) => Math.max(m, d.y), 0) : 0
+    const y = maxY
 
-  // Last column (c = 5) X using your grid math
-  const c = 5
-  const pairIndex = Math.floor(c / 2) // 0..2
-  const inPair = c % 2               // 0 or 1
-  const x =
-    pairIndex * (2 * cardW + withinPair + betweenPairs) +
-    inPair * (cardW + withinPair)
+    // Bottom-right column (c = 5)
+    const c = 5
+    const pairIndex = Math.floor(c / 2) // 0..2
+    const inPair = c % 2               // 0 or 1
+    const x =
+      pairIndex * (2 * cardW + withinPair + betweenPairs) +
+      inPair * (cardW + withinPair)
 
-  setCfg(prev => ({
-    ...prev,
-    desks: [...prev.desks, { id: nextId, x, y, tags: [] }],
-  }))
-}
-
+    setCfg(prev => ({
+      ...prev,
+      desks: [...prev.desks, { id: nextId, x, y, tags: [] }],
+    }))
+  }
 
   return (
     <div className="space-y-4">
@@ -180,7 +180,7 @@ function addDesk() {
         <button
           className="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50"
           onClick={addDesk}
-          title="Append one new seat at bottom-right of a new row"
+          title="Add one seat at the bottom-right of the existing last row"
         >
           Add one seat
         </button>
@@ -220,15 +220,15 @@ function addDesk() {
             />
           ))}
 
-          {/* Fixtures */}
+          {/* Fixtures (also offset to match seats) */}
           {cfg.fixtures.map(f => (
             <Fixture
               key={f.id}
               id={f.id}
               type={f.type}
               x={f.x}
-              y={f.y}
-              onMove={(nx, ny) => moveFixture(f.id, nx, ny)}
+              y={f.y + TOP_PAD}
+              onMove={(nx, ny) => moveFixture(f.id, nx, ny - TOP_PAD)}
               onRemove={() => removeFixture(f.id)}
             />
           ))}
