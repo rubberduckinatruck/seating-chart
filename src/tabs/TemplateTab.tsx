@@ -85,6 +85,42 @@ export default function TemplateTab() {
     setCfg(prev => ({ ...prev, desks }))
   }
 
+
+
+function addDesk() {
+  const { cardW, cardH, rowGap } = cfg.spacing
+  // compute next id
+  const nextNum = cfg.desks
+    .map(d => Number(d.id.replace(/^d/, '')))
+    .reduce((max, n) => Number.isFinite(n) ? Math.max(max, n) : max, 0) + 1
+  const nextId = `d${nextNum}`
+
+  // place new desk in a sensible spot:
+  // start a new row under the lowest existing desk
+  const maxY = cfg.desks.reduce((m, d) => Math.max(m, d.y), 0)
+  const y = cfg.desks.length ? (maxY + cardH + rowGap) : 0
+  const x = 0
+
+  setCfg(prev => ({
+    ...prev,
+    desks: [...prev.desks, { id: nextId, x, y, tags: [] }],
+  }))
+}
+
+
+<button
+  className="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50"
+  onClick={addDesk}
+  title="Append one new seat at the next row"
+>
+  Add one seat
+</button>
+
+
+  
+
+  
+
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Template (Global Layout)</h2>
