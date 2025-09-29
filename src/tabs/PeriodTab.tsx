@@ -110,15 +110,25 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
   const template = storage.getTemplate() as TemplateConfig
   const { cardW, cardH, withinPair, betweenPairs, rowGap } = template.spacing
 
-  // replicate TemplateTab sizing math
-  const gridW = 3 * (2 * cardW + withinPair + betweenPairs)
-  const gridH = 6 * (cardH + rowGap) + 100
-  const EXTRA = 350
-  const outerW = Math.max(900, gridW + EXTRA)
-  const TOP_PAD = 48 // space above row 1 for the label
-  const outerH = gridH + TOP_PAD
+// replicate TemplateTab sizing math (auto-grow height)
+const gridW = 3 * (2 * cardW + withinPair + betweenPairs)
 
-  const leftPad = Math.floor((outerW - gridW) / 2)
+// Baseline height for 6 rows, OR big enough to include the lowest desk
+const maxYDesk = template.desks.length
+  ? template.desks.reduce((m, d) => Math.max(m, d.y), 0)
+  : 0
+
+const baselineH = 6 * (cardH + rowGap) + 100
+const extentH   = maxYDesk + cardH + 50  // lowest desk + its height + padding
+const gridH     = Math.max(baselineH, extentH)
+
+const EXTRA   = 350
+const outerW  = Math.max(900, gridW + EXTRA)
+const TOP_PAD = 48            // space above row 1 for the label
+const outerH  = gridH + TOP_PAD
+
+const leftPad = Math.floor((outerW - gridW) / 2)
+
 
   const studentsCfg = storage.getStudents()
   const rulesCfg = storage.getRules()
