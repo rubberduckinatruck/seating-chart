@@ -101,7 +101,7 @@ export default function TemplateTab() {
   }
 
   // ---- Add one seat (bottom-right of the EXISTING last row) ----
-  fufunction addDesk() {
+  function addDesk() {
   const { cardW, cardH, withinPair, betweenPairs, rowGap } = cfg.spacing
 
   // Next id: d##
