@@ -29,6 +29,7 @@ export default function TemplateTab() {
 
   // ---- Desks ----
   function moveDesk(id: string, nx: number, ny: number) {
+    // ny passed from Seat includes TOP_PAD visually; store without it
     const meIdx = cfg.desks.findIndex(d => d.id === id)
     const myRect: Rect = { x: nx, y: ny, w: cardW, h: cardH }
     const collide = cfg.desks.some((d, i) =>
@@ -85,35 +86,34 @@ export default function TemplateTab() {
     setCfg(prev => ({ ...prev, desks }))
   }
 
-  // ---- Add one seat helper ----
+  // ---- Add one seat (bottom-right of a NEW last row) ----
   function addDesk() {
-  const { cardW, cardH, withinPair, betweenPairs, rowGap } = cfg.spacing
+    const { cardW, cardH, withinPair, betweenPairs, rowGap } = cfg.spacing
 
-  // Next id: d##
-  const nextNum = cfg.desks
-    .map(d => Number(d.id.replace(/^d/, '')))
-    .reduce((max, n) => (Number.isFinite(n) ? Math.max(max, n) : max), 0) + 1
-  const nextId = `d${nextNum}`
+    // Next id: d##
+    const nextNum = cfg.desks
+      .map(d => Number(d.id.replace(/^d/, '')))
+      .reduce((max, n) => (Number.isFinite(n) ? Math.max(max, n) : max), 0) + 1
+    const nextId = `d${nextNum}`
 
-  // New row Y (one row below the lowest existing y)
-  const hasAny = cfg.desks.length > 0
-  const maxY = hasAny ? cfg.desks.reduce((m, d) => Math.max(m, d.y), 0) : 0
-  const y = hasAny ? (maxY + cardH + rowGap) : 0
+    // New row: one row below the lowest existing y
+    const hasAny = cfg.desks.length > 0
+    const maxY = hasAny ? cfg.desks.reduce((m, d) => Math.max(m, d.y), 0) : 0
+    const y = hasAny ? (maxY + cardH + rowGap) : 0
 
-  // Last column (c = 5) X using your grid math
-  const c = 5
-  const pairIndex = Math.floor(c / 2) // 0..2
-  const inPair = c % 2               // 0 or 1
-  const x =
-    pairIndex * (2 * cardW + withinPair + betweenPairs) +
-    inPair * (cardW + withinPair)
+    // Bottom-right = last column (c = 5)
+    const c = 5
+    const pairIndex = Math.floor(c / 2) // 0..2
+    const inPair = c % 2               // 0 or 1
+    const x =
+      pairIndex * (2 * cardW + withinPair + betweenPairs) +
+      inPair * (cardW + withinPair)
 
-  setCfg(prev => ({
-    ...prev,
-    desks: [...prev.desks, { id: nextId, x, y, tags: [] }],
-  }))
-}
-
+    setCfg(prev => ({
+      ...prev,
+      desks: [...prev.desks, { id: nextId, x, y, tags: [] }],
+    }))
+  }
 
   return (
     <div className="space-y-4">
@@ -179,7 +179,7 @@ export default function TemplateTab() {
         <button
           className="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50"
           onClick={addDesk}
-          title="Append one new seat at the next row"
+          title="Append one new seat at bottom-right of a new row"
         >
           Add one seat
         </button>
@@ -199,22 +199,22 @@ export default function TemplateTab() {
           FRONT OF CLASSROOM
         </div>
 
-        {/* Centered inner layer (shifted down by TOP_PAD) */}
+        {/* Centered inner layer (keep at top: 0 for correct drag math) */}
         <div
           className="absolute"
-          style={{ top: TOP_PAD, left: leftPad, width: gridW, height: outerH - TOP_PAD }}
+          style={{ top: 0, left: leftPad, width: gridW, height: outerH }}
         >
-          {/* Desks */}
+          {/* Desks (render with TOP_PAD offset; subtract on move) */}
           {cfg.desks.map(d => (
             <Seat
               key={d.id}
               id={d.id}
               x={d.x}
-              y={d.y}
+              y={d.y + TOP_PAD}
               w={cfg.spacing.cardW}
               h={cfg.spacing.cardH}
               tags={d.tags}
-              onMove={(nx, ny) => moveDesk(d.id, nx, ny)}
+              onMove={(nx, ny) => moveDesk(d.id, nx, ny - TOP_PAD)}
               onToggleTag={(tag) => toggleDeskTag(d.id, tag)}
             />
           ))}
