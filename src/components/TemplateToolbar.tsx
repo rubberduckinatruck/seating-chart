@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from 'react'
 import type { TemplateConfig } from '../lib/types'
 import { storage } from '../lib/storage'
 
-const PRESET_KEYS = ['template-default', 'testing', 'groups'] as const
+const PRESET_KEYS = ['template-default', 'testing', 'groups', '2x3'] as const
 type PresetKey = typeof PRESET_KEYS[number]
 
 const PRESET_LABELS: Record<PresetKey, string> = {
   'template-default': 'Default Paired Columns',
   'testing': 'Testing',
   'groups': 'Groups of 4',
+  '2x3': '2x3s',
 }
 
 const LS_PREFIX = 'seating.presets.'
