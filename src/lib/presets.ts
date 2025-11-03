@@ -1,6 +1,6 @@
 import type { TemplateConfig } from '../lib/types'
 
-export type PresetKey = 'template-default' | 'testing' | 'groups'
+export type PresetKey = 'template-default' | 'testing' | 'groups' | '2x3'
 
 // === read from localStorage ===
 export function lsGetPreset(key: PresetKey): TemplateConfig | null {
