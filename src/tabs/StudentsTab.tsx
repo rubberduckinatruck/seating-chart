@@ -94,6 +94,7 @@ function TagsField() {
 
 export default function StudentsTab() {
   const [cfg, setCfg] = useState<StudentsConfig>(() => ensureStudentsShape(storage.getStudents()))
+  const [hiddenIds, setHiddenIds] = useState<string[]>(() => storage.getHiddenStudentIds())
   const [filter, setFilter] = useState('')
 
   // collapsed by default for all periods
@@ -108,10 +109,16 @@ export default function StudentsTab() {
 
   // listen for external updates (e.g., sync from manifests) and cross-tab storage bumps
   useEffect(() => {
-    const onUpdate = () => setCfg(ensureStudentsShape(storage.getStudents()))
-    const onStorage = (e: StorageEvent) => {
-      if (!e.key || !e.key.startsWith('seating.')) return
+    const onUpdate = () => {
       setCfg(ensureStudentsShape(storage.getStudents()))
+      setHiddenIds(storage.getHiddenStudentIds())
+    }
+    const onStorage = (e: StorageEvent) => {
+      if (!e.key) return
+      const k = e.key
+      if (!(k.startsWith('seating.') || k.startsWith('sc.'))) return
+      setCfg(ensureStudentsShape(storage.getStudents()))
+      setHiddenIds(storage.getHiddenStudentIds())
     }
     window.addEventListener('seating:students-updated', onUpdate as EventListener)
     window.addEventListener('storage', onStorage)
@@ -120,6 +127,50 @@ export default function StudentsTab() {
       window.removeEventListener('storage', onStorage)
     }
   }, [])
+
+  const hiddenSet = useRef<Set<string>>(new Set(hiddenIds))
+  useEffect(() => {
+    hiddenSet.current = new Set(hiddenIds)
+  }, [hiddenIds])
+
+  function hideStudentEverywhere(studentId: string) {
+    // 1) mark hidden
+    const nextHidden = Array.from(new Set([...(storage.getHiddenStudentIds() || []), studentId]))
+    storage.setHiddenStudentIds(nextHidden)
+    setHiddenIds(nextHidden)
+
+    // 2) clear any seat assignments that reference this student
+    const assigns = storage.getAssignments()
+    const assignsNext: any = { ...assigns }
+    for (const p of PERIODS) {
+      const per = { ...(assignsNext[p] || {}) }
+      for (const k of Object.keys(per)) {
+        if (per[k] === studentId) per[k] = null
+      }
+      assignsNext[p] = per
+    }
+    storage.setAssignments(assignsNext)
+
+    // 3) remove from rules (together/apart pairs) to prevent ghost references
+    const rules = storage.getRules() as any
+    const rulesNext: any = { ...rules }
+    for (const p of PERIODS) {
+      const r = rulesNext[p] || { together: [], apart: [] }
+      const strip = (pairs: [string, string][]) => (pairs || []).filter(([a, b]) => a !== studentId && b !== studentId)
+      rulesNext[p] = { ...r, together: strip(r.together), apart: strip(r.apart) }
+    }
+    storage.setRules(rulesNext)
+
+    // 4) nudge other views
+    broadcastStudentsUpdated({ reason: 'other' })
+  }
+
+  function unhideStudent(studentId: string) {
+    const next = (storage.getHiddenStudentIds() || []).filter(id => id !== studentId)
+    storage.setHiddenStudentIds(next)
+    setHiddenIds(next)
+    broadcastStudentsUpdated({ reason: 'other' })
+  }
 
   async function handleSync() {
     try {
@@ -384,6 +435,7 @@ export default function StudentsTab() {
           .slice()
           .sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b)))
           .filter(matches)
+          .filter(s => !hiddenSet.current.has(s.id))
         const isCollapsed = collapsed[p]
         const totalCount = raw.length
         return (
@@ -407,17 +459,47 @@ export default function StudentsTab() {
                   <div className="col-span-3">Display Name</div>
                   <div className="col-span-3">Photo Filename (id)</div>
                   <div className="col-span-3">Tags</div>
-                  <div className="col-span-3">Notes</div>
+                  <div className="col-span-2">Notes</div>
+                  <div className="col-span-1 text-right">Actions</div>
                 </div>
 
                 {list.map((s) => (
                   <Row
                     key={s.id}
-                    period={p}
                     student={s}
                     onChange={(patch) => updateStudent(p, s.id, patch)}
+                    onHide={() => hideStudentEverywhere(s.id)}
                   />
                 ))}
+
+                {/* Hidden students (per period) */}
+                {hiddenIds.length > 0 && (
+                  <details className="mt-3">
+                    <summary className="cursor-pointer text-xs text-slate-600">
+                      Hidden students ({hiddenIds.length})
+                    </summary>
+                    <div className="mt-2 space-y-1">
+                      {raw
+                        .filter(s => hiddenSet.current.has(s.id))
+                        .slice()
+                        .sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b)))
+                        .map(s => (
+                          <div key={s.id} className="flex items-center justify-between px-2 py-1 rounded bg-slate-50">
+                            <div className="text-sm text-slate-700">
+                              {getDisplayName(s)} <span className="text-xs text-slate-500">({s.id})</span>
+                            </div>
+                            <button
+                              type="button"
+                              className="px-2 py-1 text-xs rounded-md border border-slate-300 bg-white hover:bg-slate-50"
+                              onClick={() => unhideStudent(s.id)}
+                            >
+                              Restore
+                            </button>
+                          </div>
+                        ))}
+                    </div>
+                  </details>
+                )}
               </div>
             )}
           </div>
@@ -432,13 +514,13 @@ export default function StudentsTab() {
 ----------------------------------------------------------------------------- */
 
 function Row({
-  period,
   student,
   onChange,
+  onHide,
 }: {
-  period: PeriodId
   student: StudentMeta
   onChange: (patch: Partial<StudentMeta>) => void
+  onHide: () => void
 }) {
   const displayValue = (student.displayName ?? student.name)
 
@@ -502,7 +584,7 @@ function Row({
       </div>
 
       {/* Notes (single-row) */}
-      <div className="col-span-3">
+      <div className="col-span-2">
         <textarea
           className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm resize-none h-9"
           rows={1}
@@ -510,6 +592,23 @@ function Row({
           value={student.notes ?? ''}
           onChange={(e) => onChange({ notes: e.target.value })}
         />
+      </div>
+
+      {/* Actions */}
+      <div className="col-span-1 flex justify-end">
+        <button
+          type="button"
+          className="px-2 py-1 text-xs rounded-md border border-rose-200 bg-white text-rose-700 hover:bg-rose-50"
+          onClick={() => {
+            const ok = confirm(
+              `Hide ${getDisplayName(student)} from view?\n\nThis will remove them from the roster and any seats on this device/browser. You can restore them later.`
+            )
+            if (ok) onHide()
+          }}
+          title="Hide student from view (soft delete)"
+        >
+          Hide
+        </button>
       </div>
     </div>
   )
