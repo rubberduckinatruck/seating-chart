@@ -153,7 +153,16 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodId])
 
-  const students: StudentMeta[] = studentsCfg[periodId] || []
+  // Filter out hidden students so they don't appear in period view pools/drag/etc.
+  const hiddenIds = storage.getHiddenStudentIds()
+  const hiddenSet = useMemo(() => new Set(hiddenIds), [hiddenIds])
+
+  const studentsAll: StudentMeta[] = studentsCfg[periodId] || []
+  const students: StudentMeta[] = useMemo(
+    () => studentsAll.filter(s => !hiddenSet.has(s.id)),
+    [studentsAll, hiddenSet]
+  )
+
   const periodLabel = `Period ${periodId.slice(1)}`
 
   // --- compute "unseated" list for this period ---
@@ -161,9 +170,8 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
     const seatedIds = new Set(
       Object.values(assignments).filter((v): v is string => !!v)
     )
-    const all = studentsCfg[periodId] || []
-    return all.filter(s => !seatedIds.has(s.id))
-  }, [assignments, studentsCfg, periodId])
+    return students.filter(s => !seatedIds.has(s.id))
+  }, [assignments, students])
 
   // persistence helpers
   function persistAssignments(next: Record<string, string | null>) {
@@ -456,8 +464,14 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
             {template.desks.map(d => {
               const seatId = d.id
               const studentId = assignments[seatId] ?? null
-              const s = studentId ? students.find(x => x.id === studentId) || null : null
+
+              // Hide students-from-view: treat hidden studentIds as empty seats in Period view.
+              const effectiveStudentId =
+                studentId && hiddenSet.has(studentId) ? null : studentId
+
+              const s = effectiveStudentId ? students.find(x => x.id === effectiveStudentId) || null : null
               const name = s ? getDisplayName(s) : null
+
               return (
                 <PeriodSeat
                   key={seatId}
@@ -469,7 +483,7 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
                   h={cardH}
                   tags={d.tags}
                   isExcluded={excluded.has(seatId)}
-                  studentId={studentId}
+                  studentId={effectiveStudentId}
                   studentName={name}
                   onToggleExclude={() => toggleExcluded(seatId)}
                 />
