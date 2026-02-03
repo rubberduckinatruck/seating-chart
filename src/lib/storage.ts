@@ -13,6 +13,10 @@ const KEY_STUDENTS = 'sc.studentsConfig.v1'
 const KEY_ASSIGN   = 'sc.periodAssignments.v1'
 const KEY_RULES    = 'sc.rulesConfig.v1'
 const KEY_EXCLUDE  = 'sc.excludedSeats.v1'
+
+// Added: hidden students (soft delete / remove-from-view)
+const KEY_HIDDEN_STUDENTS = 'sc.hiddenStudentIds.v1'
+
 const KEY_SCHEMA   = 'sc.schemaVersion'
 const CURRENT_SCHEMA = 1
 
@@ -75,6 +79,10 @@ export function ensureSchemaInitialized() {
       localStorage.removeItem(KEY_ASSIGN)
       localStorage.removeItem(KEY_RULES)
       localStorage.removeItem(KEY_EXCLUDE)
+
+      // Added: clear hidden list on schema change
+      localStorage.removeItem(KEY_HIDDEN_STUDENTS)
+
       localStorage.setItem(KEY_SCHEMA, String(CURRENT_SCHEMA))
     } catch {
       // ignore
@@ -85,6 +93,9 @@ export function ensureSchemaInitialized() {
     write(KEY_ASSIGN, defaultAssignments())
     write(KEY_RULES, defaultRules())
     write(KEY_EXCLUDE, defaultExcluded())
+
+    // Added: initialize hidden list
+    write(KEY_HIDDEN_STUDENTS, defaultHiddenStudentIds())
   } else {
     // Ensure presence if any key is missing/corrupt
     if (!safeRead<TemplateConfig>(KEY_TEMPLATE)) write(KEY_TEMPLATE, defaultTemplate())
@@ -92,6 +103,9 @@ export function ensureSchemaInitialized() {
     if (!safeRead<PeriodAssignments>(KEY_ASSIGN)) write(KEY_ASSIGN, defaultAssignments())
     if (!safeRead<RulesConfig>(KEY_RULES)) write(KEY_RULES, defaultRules())
     if (!safeRead<ExcludedSeats>(KEY_EXCLUDE)) write(KEY_EXCLUDE, defaultExcluded())
+
+    // Added: ensure presence for hidden list
+    if (!safeRead<string[]>(KEY_HIDDEN_STUDENTS)) write(KEY_HIDDEN_STUDENTS, defaultHiddenStudentIds())
   }
 }
 
@@ -168,6 +182,11 @@ function defaultExcluded(): ExcludedSeats {
   return { p1: [], p3: [], p4: [], p5: [], p6: [] }
 }
 
+// Added: hidden students default
+function defaultHiddenStudentIds(): string[] {
+  return []
+}
+
 // -----------------------------
 // Public storage API
 // -----------------------------
@@ -206,5 +225,25 @@ export const storage = {
   },
   setExcluded(v: ExcludedSeats) {
     write(KEY_EXCLUDE, v)
+  },
+
+  // -----------------------------
+  // Added: hidden students API
+  // -----------------------------
+  getHiddenStudentIds(): string[] {
+    const v = safeRead<string[]>(KEY_HIDDEN_STUDENTS)
+    return Array.isArray(v) ? v : defaultHiddenStudentIds()
+  },
+  setHiddenStudentIds(ids: string[]) {
+    // Store a clean, de-duped list of non-empty strings
+    const cleaned = Array.from(
+      new Set(
+        (Array.isArray(ids) ? ids : [])
+          .filter((x) => typeof x === 'string')
+          .map((x) => x.trim())
+          .filter(Boolean)
+      )
+    )
+    write(KEY_HIDDEN_STUDENTS, cleaned)
   },
 }
