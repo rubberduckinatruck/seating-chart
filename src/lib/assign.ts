@@ -1,4 +1,4 @@
-
+// src/lib/assign.ts
 import type { TemplateConfig, StudentMeta, StudentTag } from './types'
 import { getDisplayName } from './utils'
 
@@ -80,6 +80,47 @@ function buildConstraints(ctx: AssignContext) {
   return { togetherGroups, apartPairs }
 }
 
+function buildAdjacency(template: TemplateConfig) {
+  const pos = new Map<string, { x: number; y: number }>()
+  for (const d of template.desks) pos.set(d.id, { x: d.x, y: d.y })
+
+  // Use template spacing when available; fall back to reasonable defaults.
+  const sx = (template as any).spacing?.withinPair ?? 120
+  const rowGap = (template as any).spacing?.rowGap ?? 110
+
+  // Tight horizontal threshold prevents “across the big gap” being treated as adjacent.
+  const H_NEIGHBOR_MAX = sx + 20
+  const V_NEIGHBOR_MAX = rowGap + 20
+
+  const neighbors = new Map<string, Set<string>>()
+  const seatIds = template.desks.map(d => d.id)
+  for (const a of seatIds) neighbors.set(a, new Set())
+
+  for (let i = 0; i < seatIds.length; i++) {
+    for (let j = i + 1; j < seatIds.length; j++) {
+      const a = seatIds[i]
+      const b = seatIds[j]
+      const pa = pos.get(a)!
+      const pb = pos.get(b)!
+      const dx = Math.abs(pa.x - pb.x)
+      const dy = Math.abs(pa.y - pb.y)
+
+      // Same row horizontal neighbor (do not count across the big gap)
+      const isHorizontalNeighbor = dy <= 5 && dx > 0 && dx <= H_NEIGHBOR_MAX
+
+      // Optional vertical neighbor (same column-ish). Keep enabled to support “front/back” adjacency.
+      const isVerticalNeighbor = dx <= 5 && dy > 0 && dy <= V_NEIGHBOR_MAX
+
+      if (isHorizontalNeighbor || isVerticalNeighbor) {
+        neighbors.get(a)!.add(b)
+        neighbors.get(b)!.add(a)
+      }
+    }
+  }
+
+  return neighbors
+}
+
 /**
  * Assign students to seats with priorities:
  * 1) Excluded seats are never auto-assigned
@@ -92,6 +133,7 @@ export function assignSeating(ctx: AssignContext, strategy: 'random' | 'alpha'):
   const seatTags = new Map(ctx.template.desks.map(d => [d.id, d.tags as StudentTag[]]))
   const availableSeats = seats.filter(s => !ctx.excluded.has(s))
 
+  const neighbors = buildAdjacency(ctx.template)
   const { togetherGroups, apartPairs } = buildConstraints(ctx)
 
   const students = ctx.students.slice()
@@ -102,21 +144,40 @@ export function assignSeating(ctx: AssignContext, strategy: 'random' | 'alpha'):
   const usedSeats = new Set<string>()
   const conflicts: string[] = []
 
-  // 1) Place together groups in contiguous seat clusters (greedy)
+  // 1) Place together groups in adjacent seat clusters (greedy)
   for (const group of togetherGroups) {
     const candidateClusters: string[][] = []
-    for (let i = 0; i < availableSeats.length; i++) {
-      const cluster = [availableSeats[i]]
-      for (let j = i + 1; j < availableSeats.length && cluster.length < group.length; j++) {
-        cluster.push(availableSeats[j])
+    for (const start of availableSeats) {
+      if (usedSeats.has(start)) continue
+
+      const cluster = [start]
+      const seen = new Set(cluster)
+      const queue = [start]
+
+      // BFS grow a connected cluster of required size
+      while (queue.length && cluster.length < group.length) {
+        const cur = queue.shift()!
+        for (const nb of neighbors.get(cur) ?? []) {
+          if (usedSeats.has(nb)) continue
+          if (seen.has(nb)) continue
+          // Only consider seats that are actually available (not excluded)
+          if (!availableSeats.includes(nb)) continue
+          seen.add(nb)
+          cluster.push(nb)
+          queue.push(nb)
+          if (cluster.length >= group.length) break
+        }
       }
+
       if (cluster.length === group.length) candidateClusters.push(cluster)
     }
+
     const chosen = choice(candidateClusters)
     if (!chosen) {
       conflicts.push(`Could not seat group together: ${group.join(', ')}`)
       continue
     }
+
     const perm = strategy === 'alpha' ? group.slice() : arrayShuffled(group)
     for (let k = 0; k < perm.length; k++) {
       const sid = perm[k]
@@ -134,13 +195,17 @@ export function assignSeating(ctx: AssignContext, strategy: 'random' | 'alpha'):
   // 2) Place remaining students honoring "apart" preference when possible
   for (const stu of students) {
     if (seatOf.has(stu.id)) continue
-    const prefs = availableSeats.filter(sid => !usedSeats.has(sid) && tagsMatch(stu.tags, seatTags.get(sid)))
+    const prefs = availableSeats.filter(
+      sid => !usedSeats.has(sid) && tagsMatch(stu.tags, seatTags.get(sid))
+    )
     const candidates = prefs.length ? prefs : availableSeats.filter(sid => !usedSeats.has(sid))
     let placed = false
     for (const sid of candidates) {
       let violates = false
-      for (const [otherId] of seatOf.entries()) {
-        if (apartPairs.has(keyPair(stu.id, otherId))) {
+      for (const [otherId, otherSeat] of seatOf.entries()) {
+        if (!apartPairs.has(keyPair(stu.id, otherId))) continue
+        // apart means: must not be in a neighboring seat
+        if (neighbors.get(sid)?.has(otherSeat)) {
           violates = true
           break
         }
