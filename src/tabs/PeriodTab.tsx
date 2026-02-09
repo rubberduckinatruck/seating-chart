@@ -132,9 +132,13 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
 
   // re-hydrate when periodId changes
   useEffect(() => {
-    setAssignments(buildAssignmentsForPeriod(template, assignCfg, periodId))
-    setExcluded(buildExcludedForPeriod(excludedMap, periodId))
-    setRules(buildRulesForPeriod(rulesCfg, periodId))
+    const freshAssignCfg = storage.getAssignments()
+    const freshExcludedMap = storage.getExcluded() as unknown as Record<string, string[]>
+    const freshRulesCfg = storage.getRules()
+
+    setAssignments(buildAssignmentsForPeriod(template, freshAssignCfg, periodId))
+    setExcluded(buildExcludedForPeriod(freshExcludedMap, periodId))
+    setRules(buildRulesForPeriod(freshRulesCfg, periodId))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodId])
 
@@ -158,122 +162,131 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
     return students.filter(s => !seatedIds.has(s.id))
   }, [assignments, students])
 
-  // persistence helpers
+  // persistence helpers (read fresh storage before writing to avoid stomping other changes)
   function persistAssignments(next: Record<string, string | null>) {
-    const full = { ...assignCfg, [periodId]: next }
+    const current = storage.getAssignments() || {}
+    const full = { ...current, [periodId]: next }
     storage.setAssignments(full)
     try { localStorage.setItem('sc.bump', String(Date.now())) } catch {}
     try { localStorage.setItem('seating.bump', String(Date.now())) } catch {}
   }
   function persistExcluded(next: Set<string>) {
     const arr = Array.from(next)
-    const full = { ...excludedMap, [periodId]: arr }
+    const current = storage.getExcluded() as unknown as Record<string, string[]> || {}
+    const full = { ...current, [periodId]: arr }
     storage.setExcluded(full as any)
     try { localStorage.setItem('sc.bump', String(Date.now())) } catch {}
     try { localStorage.setItem('seating.bump', String(Date.now())) } catch {}
   }
   function persistRules(next: { together: [string, string][], apart: [string, string][] }) {
-    const full: RulesConfig = { ...rulesCfg, [periodId]: next } as RulesConfig
+    const current = storage.getRules() || {}
+    const full: RulesConfig = { ...current, [periodId]: next } as RulesConfig
     storage.setRules(full)
     try { localStorage.setItem('sc.bump', String(Date.now())) } catch {}
     try { localStorage.setItem('seating.bump', String(Date.now())) } catch {}
   }
 
-function randomize() {
-  try {
-    // present students (already filtered for hidden earlier)
-    const presentIds = new Set(students.map(s => s.id))
-
-    // filter rules to pairs where both students exist in this period
-    const rulesFiltered = {
-      together: rules.together.filter(([a, b]) => presentIds.has(a) && presentIds.has(b)),
-      apart: rules.apart.filter(([a, b]) => presentIds.has(a) && presentIds.has(b)),
-    }
-
-    // prepare ctx for solver (excluded is already a Set in this component)
-    const ctx = {
-      template,
-      students,
-      excluded, // AssignContext expects a Set<string>
-      rules: rulesFiltered,
-    }
-
-    // run solver with try/catch protection
-    let result: any = null
+  // assignment actions
+  function randomize() {
     try {
-      result = assignSeating(ctx as any, 'random')
-    } catch (err) {
-      console.error('assignSeating threw:', err)
-      result = { errorFromSolver: String(err) }
-    }
+      // explicit quick input debug
+      console.log('RANDOMIZE INPUT (explicit):', {
+        excludedArray: Array.from(excluded),
+        excludedCount: excluded.size,
+        desks: template.desks.map(d => d.id),
+      })
 
-    // diagnostics: seat counts, available seats, etc.
-    const seats = template.desks.map(d => d.id)
-    const availableSeats = seats.filter(sid => !excluded.has(sid))
-    const debug = {
-      seatCount: seats.length,
-      availableCount: availableSeats.length,
-      studentCount: students.length,
-      togetherCount: rulesFiltered.together.length,
-      apartCount: rulesFiltered.apart.length,
-      presentStudents: students.map(s => ({ id: s.id, name: getDisplayName(s) })),
-      rulesFiltered,
-      solverResult: result,
-    }
-    console.log('RANDOMIZE DEBUG', debug)
+      // present students (already filtered for hidden earlier)
+      const presentIds = new Set(students.map(s => s.id))
 
-    // If solver returned a Map seatOf -> convert to seatId->studentId map
-    if (result && result.seatOf instanceof Map) {
+      // filter rules to pairs where both students exist in this period
+      const rulesFiltered = {
+        together: rules.together.filter(([a, b]) => presentIds.has(a) && presentIds.has(b)),
+        apart: rules.apart.filter(([a, b]) => presentIds.has(a) && presentIds.has(b)),
+      }
+
+      // prepare ctx for solver (excluded is already a Set in this component)
+      const ctx = {
+        template,
+        students,
+        excluded, // AssignContext expects a Set<string>
+        rules: rulesFiltered,
+      }
+
+      // run solver with try/catch protection
+      let result: any = null
+      try {
+        result = assignSeating(ctx as any, 'random')
+      } catch (err) {
+        console.error('assignSeating threw:', err)
+        result = { errorFromSolver: String(err) }
+      }
+
+      // diagnostics: seat counts, available seats, etc.
+      const seats = template.desks.map(d => d.id)
+      const availableSeats = seats.filter(sid => !excluded.has(sid))
+      const debug = {
+        seatCount: seats.length,
+        availableCount: availableSeats.length,
+        studentCount: students.length,
+        togetherCount: rulesFiltered.together.length,
+        apartCount: rulesFiltered.apart.length,
+        presentStudents: students.map(s => ({ id: s.id, name: getDisplayName(s) })),
+        rulesFiltered,
+        solverResult: result,
+      }
+      console.log('RANDOMIZE DEBUG', debug)
+
+      // If solver returned a Map seatOf -> convert to seatId->studentId map
+      if (result && result.seatOf instanceof Map) {
+        const next = buildBlankAssignments(template)
+        for (const [studentId, seatId] of result.seatOf.entries()) {
+          if (seatId in next) next[seatId] = studentId
+        }
+        setAssignments(next)
+        persistAssignments(next)
+
+        // show conflicts if any (concise)
+        if (Array.isArray(result.conflicts) && result.conflicts.length) {
+          const sample = result.conflicts.slice(0, 3).join('\n')
+          alert(`Randomize completed with ${result.conflicts.length} conflict(s):\n\n${sample}\n\nSee console for details.`)
+        }
+        return
+      }
+
+      // If solver returned unexpected shape or indicated an error, fall back to simple random assignment
+      console.warn('Solver did not return seatOf Map; falling back to unconstrained random assignment.')
+      if (result && result.errorFromSolver) {
+        console.warn('Solver error was:', result.errorFromSolver)
+      }
+
+      // FALLBACK: unconstrained shuffle that respects excluded seats and hidden students
+      // Build list of seat ids usable
+      const usableSeats = template.desks.map(d => d.id).filter(id => !excluded.has(id))
+      // Build list of visible students (already computed as students)
+      const studentIds = students.map(s => s.id)
+
+      // If more students than usable seats, only seat up to usable seats
+      // Shuffle student IDs
+      for (let i = studentIds.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1))
+        ;[studentIds[i], studentIds[j]] = [studentIds[j], studentIds[i]]
+      }
+
       const next = buildBlankAssignments(template)
-      for (const [studentId, seatId] of result.seatOf.entries()) {
-        if (seatId in next) next[seatId] = studentId
+      for (let i = 0; i < usableSeats.length; i++) {
+        next[usableSeats[i]] = studentIds[i] ?? null
       }
       setAssignments(next)
       persistAssignments(next)
 
-      // show conflicts if any (concise)
-      if (Array.isArray(result.conflicts) && result.conflicts.length) {
-        const sample = result.conflicts.slice(0, 3).join('\n')
-        alert(`Randomize completed with ${result.conflicts.length} conflict(s):\n\n${sample}\n\nSee console for details.`)
-      }
-      return
+      // Inform user that solver failed but fallback succeeded
+      alert('Randomize: solver failed or returned unexpected data, used fallback random assignment instead. See console (RANDOMIZE DEBUG) for details.')
+    } catch (outerErr) {
+      console.error('randomize() outer exception:', outerErr)
+      alert('Randomize failed — check console for details.')
     }
-
-    // If solver returned unexpected shape or indicated an error, fall back to simple random assignment
-    console.warn('Solver did not return seatOf Map; falling back to unconstrained random assignment.')
-    if (result && result.errorFromSolver) {
-      console.warn('Solver error was:', result.errorFromSolver)
-    }
-
-    // FALLBACK: unconstrained shuffle that respects excluded seats and hidden students
-    // Build list of seat ids usable
-    const usableSeats = template.desks.map(d => d.id).filter(id => !excluded.has(id))
-    // Build list of visible students (already computed as students)
-    const studentIds = students.map(s => s.id)
-
-    // If more students than usable seats, only seat up to usable seats
-    // Shuffle student IDs
-    for (let i = studentIds.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1))
-      ;[studentIds[i], studentIds[j]] = [studentIds[j], studentIds[i]]
-    }
-
-    const next = buildBlankAssignments(template)
-    for (let i = 0; i < usableSeats.length; i++) {
-      next[usableSeats[i]] = studentIds[i] ?? null
-    }
-    setAssignments(next)
-    persistAssignments(next)
-
-    // Inform user that solver failed but fallback succeeded
-    alert('Randomize: solver failed or returned unexpected data, used fallback random assignment instead. See console (RANDOMIZE DEBUG) for details.')
-  } catch (outerErr) {
-    console.error('randomize() outer exception:', outerErr)
-    alert('Randomize failed — check console for details.')
   }
-}
-
-
 
   function clearAll() {
     const next = buildBlankAssignments(template)
