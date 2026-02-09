@@ -179,30 +179,100 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
     try { localStorage.setItem('seating.bump', String(Date.now())) } catch {}
   }
 
-  // assignment actions
 function randomize() {
-  const baseline = buildBlankAssignments(template)
+  try {
+    // present students (already filtered for hidden earlier)
+    const presentIds = new Set(students.map(s => s.id))
 
-  const result = assignSeating(
-    {
+    // filter rules to pairs where both students exist in this period
+    const rulesFiltered = {
+      together: rules.together.filter(([a, b]) => presentIds.has(a) && presentIds.has(b)),
+      apart: rules.apart.filter(([a, b]) => presentIds.has(a) && presentIds.has(b)),
+    }
+
+    // prepare ctx for solver (excluded is already a Set in this component)
+    const ctx = {
       template,
       students,
-      rules,
-      excluded,              // ✅ for solvers that expect ctx.excluded (Set)
-      excludedDesks: excluded, // ✅ for solvers that expect ctx.excludedDesks (Set)
-      existing: baseline,    // ✅ safer than {}
-    } as any,
-    'random'
-  )
+      excluded, // AssignContext expects a Set<string>
+      rules: rulesFiltered,
+    }
 
-  if (!result.success) {
-    alert('No valid seating arrangement satisfies the current rules.')
-    return
+    // run solver with try/catch protection
+    let result: any = null
+    try {
+      result = assignSeating(ctx as any, 'random')
+    } catch (err) {
+      console.error('assignSeating threw:', err)
+      result = { errorFromSolver: String(err) }
+    }
+
+    // diagnostics: seat counts, available seats, etc.
+    const seats = template.desks.map(d => d.id)
+    const availableSeats = seats.filter(sid => !excluded.has(sid))
+    const debug = {
+      seatCount: seats.length,
+      availableCount: availableSeats.length,
+      studentCount: students.length,
+      togetherCount: rulesFiltered.together.length,
+      apartCount: rulesFiltered.apart.length,
+      presentStudents: students.map(s => ({ id: s.id, name: getDisplayName(s) })),
+      rulesFiltered,
+      solverResult: result,
+    }
+    console.log('RANDOMIZE DEBUG', debug)
+
+    // If solver returned a Map seatOf -> convert to seatId->studentId map
+    if (result && result.seatOf instanceof Map) {
+      const next = buildBlankAssignments(template)
+      for (const [studentId, seatId] of result.seatOf.entries()) {
+        if (seatId in next) next[seatId] = studentId
+      }
+      setAssignments(next)
+      persistAssignments(next)
+
+      // show conflicts if any (concise)
+      if (Array.isArray(result.conflicts) && result.conflicts.length) {
+        const sample = result.conflicts.slice(0, 3).join('\n')
+        alert(`Randomize completed with ${result.conflicts.length} conflict(s):\n\n${sample}\n\nSee console for details.`)
+      }
+      return
+    }
+
+    // If solver returned unexpected shape or indicated an error, fall back to simple random assignment
+    console.warn('Solver did not return seatOf Map; falling back to unconstrained random assignment.')
+    if (result && result.errorFromSolver) {
+      console.warn('Solver error was:', result.errorFromSolver)
+    }
+
+    // FALLBACK: unconstrained shuffle that respects excluded seats and hidden students
+    // Build list of seat ids usable
+    const usableSeats = template.desks.map(d => d.id).filter(id => !excluded.has(id))
+    // Build list of visible students (already computed as students)
+    const studentIds = students.map(s => s.id)
+
+    // If more students than usable seats, only seat up to usable seats
+    // Shuffle student IDs
+    for (let i = studentIds.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[studentIds[i], studentIds[j]] = [studentIds[j], studentIds[i]]
+    }
+
+    const next = buildBlankAssignments(template)
+    for (let i = 0; i < usableSeats.length; i++) {
+      next[usableSeats[i]] = studentIds[i] ?? null
+    }
+    setAssignments(next)
+    persistAssignments(next)
+
+    // Inform user that solver failed but fallback succeeded
+    alert('Randomize: solver failed or returned unexpected data, used fallback random assignment instead. See console (RANDOMIZE DEBUG) for details.')
+  } catch (outerErr) {
+    console.error('randomize() outer exception:', outerErr)
+    alert('Randomize failed — check console for details.')
   }
-
-  setAssignments(result.assignments)
-  persistAssignments(result.assignments)
 }
+
 
 
   function clearAll() {
