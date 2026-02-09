@@ -144,23 +144,23 @@ export function assignSeating(ctx: AssignContext, strategy: 'random' | 'alpha'):
   const usedSeats = new Set<string>()
   const conflicts: string[] = []
 
-  // 1) Place together groups in adjacent seat clusters (greedy)
+  // ---------- REPLACED: Place together groups using adjacency-aware backtracking ----------
+  // Build candidate clusters for each together group (connected clusters of the needed size)
+  const groupClustersArr: { group: string[]; clusters: string[][] }[] = []
   for (const group of togetherGroups) {
-    const candidateClusters: string[][] = []
+    const clusters: string[][] = []
+    // For each possible start seat, BFS-grow a connected cluster of required size
     for (const start of availableSeats) {
       if (usedSeats.has(start)) continue
-
-      const cluster = [start]
+      const cluster: string[] = [start]
       const seen = new Set(cluster)
       const queue = [start]
 
-      // BFS grow a connected cluster of required size
       while (queue.length && cluster.length < group.length) {
         const cur = queue.shift()!
         for (const nb of neighbors.get(cur) ?? []) {
           if (usedSeats.has(nb)) continue
           if (seen.has(nb)) continue
-          // Only consider seats that are actually available (not excluded)
           if (!availableSeats.includes(nb)) continue
           seen.add(nb)
           cluster.push(nb)
@@ -169,28 +169,80 @@ export function assignSeating(ctx: AssignContext, strategy: 'random' | 'alpha'):
         }
       }
 
-      if (cluster.length === group.length) candidateClusters.push(cluster)
+      if (cluster.length === group.length) {
+        // Ensure canonical order for cluster to avoid duplicates: sort by index in availableSeats
+        const ordered = cluster.slice().sort((a, b) => availableSeats.indexOf(a) - availableSeats.indexOf(b))
+        if (!clusters.some(c => c.join('|') === ordered.join('|'))) clusters.push(ordered)
+      }
+    }
+    groupClustersArr.push({ group, clusters })
+  }
+
+  // Sort groups by fewest candidate clusters first — heuristic to improve backtracking speed
+  groupClustersArr.sort((a, b) => a.clusters.length - b.clusters.length)
+
+  // Backtracking search to pick non-overlapping clusters for each group
+  const chosenClustersForIdx = new Map<number, string[]>()
+
+  function backtrackPick(idx: number, used: Set<string>): boolean {
+    if (idx >= groupClustersArr.length) return true
+    const { group, clusters } = groupClustersArr[idx]
+
+    if (clusters.length === 0) return false
+
+    const order = arrayShuffled(clusters)
+    for (const cluster of order) {
+      // If cluster intersects used seats, skip
+      if (cluster.some(sid => used.has(sid))) continue
+
+      // mark cluster used and recurse
+      for (const sid of cluster) used.add(sid)
+      chosenClustersForIdx.set(idx, cluster)
+
+      const ok = backtrackPick(idx + 1, used)
+      if (ok) return true
+
+      // undo
+      chosenClustersForIdx.delete(idx)
+      for (const sid of cluster) used.delete(sid)
     }
 
-    const chosen = choice(candidateClusters)
-    if (!chosen) {
-      conflicts.push(`Could not seat group together: ${group.join(', ')}`)
-      continue
-    }
+    return false
+  }
 
-    const perm = strategy === 'alpha' ? group.slice() : arrayShuffled(group)
-    for (let k = 0; k < perm.length; k++) {
-      const sid = perm[k]
-      const seatId = chosen[k]
-      if (usedSeats.has(seatId)) continue
-      const stu = students.find(s => s.id === sid)
-      if (!stu) continue
-      const ok = tagsMatch(stu.tags, seatTags.get(seatId))
-      if (!ok) conflicts.push(`Tag mismatch: ${stu ? getDisplayName(stu) : sid} @ ${seatId}`)
-      seatOf.set(sid, seatId)
-      usedSeats.add(seatId)
+  const initialUsed = new Set<string>([...usedSeats])
+  const okPick = backtrackPick(0, initialUsed)
+
+  if (okPick) {
+    // materialize assignments for chosen clusters
+    for (let idx = 0; idx < groupClustersArr.length; idx++) {
+      const group = groupClustersArr[idx].group
+      const cluster = chosenClustersForIdx.get(idx)
+      if (!cluster) continue
+      const perm = strategy === 'alpha' ? group.slice() : arrayShuffled(group)
+      for (let k = 0; k < perm.length; k++) {
+        const sid = perm[k]
+        const seatId = cluster[k]
+        if (usedSeats.has(seatId)) continue
+        const stu = students.find(s => s.id === sid)
+        if (!stu) continue
+        const ok = tagsMatch(stu.tags, seatTags.get(seatId))
+        if (!ok) conflicts.push(`Tag mismatch: ${stu ? getDisplayName(stu) : sid} @ ${seatId}`)
+        seatOf.set(sid, seatId)
+        usedSeats.add(seatId)
+      }
+    }
+  } else {
+    // When backtracking failed, record conflicts for groups that have no non-overlapping cluster set
+    for (const { group, clusters } of groupClustersArr) {
+      if (clusters.length === 0) {
+        conflicts.push(`Could not seat group together: ${group.join(', ')}`)
+      } else {
+        conflicts.push(`Could not place all together-groups without overlap; group: ${group.join(', ')}`)
+      }
     }
   }
+  // ---------- END REPLACED BLOCK ----------
 
   // 2) Place remaining students honoring "apart" preference when possible
   for (const stu of students) {
