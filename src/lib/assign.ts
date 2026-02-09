@@ -80,53 +80,77 @@ function buildConstraints(ctx: AssignContext) {
   return { togetherGroups, apartPairs }
 }
 
+/**
+ * Build adjacency using row grouping:
+ * - Seats grouped into rows by their y coordinate (tolerance).
+ * - Immediate left/right neighbors in the same row are considered adjacent.
+ * - Optional front/back adjacency (commented) is available.
+ */
 function buildAdjacency(template: TemplateConfig) {
   const pos = new Map<string, { x: number; y: number }>()
   for (const d of template.desks) pos.set(d.id, { x: d.x, y: d.y })
 
-  // Use template spacing when available; fall back to reasonable defaults.
-  const sx = (template as any).spacing?.withinPair ?? 120
-  const rowGap = (template as any).spacing?.rowGap ?? 110
+  // Group seats into rows by their 'y' coordinate (allow small tolerance)
+  const rows: { y: number; seats: { id: string; x: number }[] }[] = []
+  const Y_TOLERANCE = 12 // pixels; tweak if your rows are not perfectly aligned
 
-  // Tight horizontal threshold prevents “across the big gap” being treated as adjacent.
-  const H_NEIGHBOR_MAX = sx + 20
-  const V_NEIGHBOR_MAX = rowGap + 20
+  for (const d of template.desks) {
+    const y = d.y
+    let row = rows.find(r => Math.abs(r.y - y) <= Y_TOLERANCE)
+    if (!row) {
+      row = { y, seats: [] }
+      rows.push(row)
+    }
+    row.seats.push({ id: d.id, x: d.x })
+  }
 
+  // Sort rows top-to-bottom and seats left-to-right
+  rows.sort((a, b) => a.y - b.y)
+  for (const r of rows) r.seats.sort((a, b) => a.x - b.x)
+
+  // Build neighbors: immediate left/right in row
   const neighbors = new Map<string, Set<string>>()
-  const seatIds = template.desks.map(d => d.id)
-  for (const a of seatIds) neighbors.set(a, new Set())
+  for (const d of template.desks) neighbors.set(d.id, new Set())
 
-  for (let i = 0; i < seatIds.length; i++) {
-    for (let j = i + 1; j < seatIds.length; j++) {
-      const a = seatIds[i]
-      const b = seatIds[j]
-      const pa = pos.get(a)!
-      const pb = pos.get(b)!
-      const dx = Math.abs(pa.x - pb.x)
-      const dy = Math.abs(pa.y - pb.y)
-
-      // Same row horizontal neighbor (do not count across the big gap)
-      const isHorizontalNeighbor = dy <= 5 && dx > 0 && dx <= H_NEIGHBOR_MAX
-
-      // Optional vertical neighbor (same column-ish). Keep enabled to support “front/back” adjacency.
-      const isVerticalNeighbor = dx <= 5 && dy > 0 && dy <= V_NEIGHBOR_MAX
-
-      if (isHorizontalNeighbor || isVerticalNeighbor) {
-        neighbors.get(a)!.add(b)
-        neighbors.get(b)!.add(a)
+  for (const r of rows) {
+    for (let i = 0; i < r.seats.length; i++) {
+      const cur = r.seats[i].id
+      const left = r.seats[i - 1]?.id
+      const right = r.seats[i + 1]?.id
+      if (left) {
+        neighbors.get(cur)!.add(left)
+      }
+      if (right) {
+        neighbors.get(cur)!.add(right)
       }
     }
   }
+
+  // OPTIONAL: front/back adjacency (disabled by default)
+  /*
+  const V_X_TOLERANCE = 16
+  for (let ri = 0; ri < rows.length - 1; ri++) {
+    const top = rows[ri]
+    const bot = rows[ri + 1]
+    for (const ts of top.seats) {
+      for (const bs of bot.seats) {
+        if (Math.abs(ts.x - bs.x) <= V_X_TOLERANCE) {
+          neighbors.get(ts.id)!.add(bs.id)
+          neighbors.get(bs.id)!.add(ts.id)
+        }
+      }
+    }
+  }
+  */
 
   return neighbors
 }
 
 /**
  * Assign students to seats with priorities:
- * 1) Excluded seats are never auto-assigned
- * 2) Together/apart rules
- * 3) Student/desk tag matching
- * 4) Fill remaining randomly; record conflicts
+ * 1) Place students involved in "apart" rules first (try to keep them separated).
+ * 2) Place together-groups in adjacent clusters (backtracking to avoid overlap).
+ * 3) Place remaining students (tags preferred), recording conflicts.
  */
 export function assignSeating(ctx: AssignContext, strategy: 'random' | 'alpha'): AssignResult {
   const seats = ctx.template.desks.map(d => d.id)
@@ -144,7 +168,134 @@ export function assignSeating(ctx: AssignContext, strategy: 'random' | 'alpha'):
   const usedSeats = new Set<string>()
   const conflicts: string[] = []
 
-  // ---------- REPLACED: Place together groups using adjacency-aware backtracking ----------
+  // -----------------------------
+  // 0) Helper maps for quick lookups
+  // -----------------------------
+  const studentById = new Map(students.map(s => [s.id, s]))
+  const apartAdj = new Map<string, Set<string>>() // studentId -> set of studentIds they must be apart from
+  for (const [a, b] of ctx.rules.apart) {
+    if (!apartAdj.has(a)) apartAdj.set(a, new Set())
+    if (!apartAdj.has(b)) apartAdj.set(b, new Set())
+    apartAdj.get(a)!.add(b)
+    apartAdj.get(b)!.add(a)
+  }
+
+  // -----------------------------
+  // 1) Place students involved in "apart" rules first (backtracking)
+  // -----------------------------
+  const apartStudents = Array.from(apartAdj.keys())
+  // sort by degree desc (students with many apart constraints first)
+  apartStudents.sort((a, b) => (apartAdj.get(b)!.size - apartAdj.get(a)!.size))
+
+  // Precompute candidate seats per apart-student (respecting tags)
+  const apartCandidates = new Map<string, string[]>()
+  for (const sid of apartStudents) {
+    const stu = studentById.get(sid)
+    if (!stu) {
+      apartCandidates.set(sid, [])
+      continue
+    }
+    const prefs = availableSeats.filter(seatId => tagsMatch(stu.tags, seatTags.get(seatId)))
+    const cand = prefs.length ? prefs.filter(seatId => !ctx.excluded.has(seatId)) : availableSeats.filter(seatId => !ctx.excluded.has(seatId))
+    apartCandidates.set(sid, cand.slice()) // copy
+  }
+
+  // Backtracking to assign seats to apartStudents such that none are adjacent to their apart partners
+  const chosenApart = new Map<string, string>() // studentId -> seatId
+
+  function backtrackApart(idx: number, used: Set<string>): boolean {
+    if (idx >= apartStudents.length) return true
+    const sid = apartStudents[idx]
+    const cand = apartCandidates.get(sid) || []
+    // try candidates in random order for randomness
+    const order = arrayShuffled(cand)
+    for (const seatId of order) {
+      if (used.has(seatId)) continue
+      // check that seatId does not place sid adjacent to any already-placed apart partners
+      let violates = false
+      const partners = apartAdj.get(sid) || new Set()
+      for (const p of partners) {
+        const placedSeat = chosenApart.get(p) || seatOf.get(p)
+        if (!placedSeat) continue
+        // if seatId is neighbor of placedSeat -> violates
+        if (neighbors.get(seatId)?.has(placedSeat)) {
+          violates = true
+          break
+        }
+      }
+      if (violates) continue
+
+      // place and recurse
+      used.add(seatId)
+      chosenApart.set(sid, seatId)
+      const ok = backtrackApart(idx + 1, used)
+      if (ok) return true
+      // undo
+      chosenApart.delete(sid)
+      used.delete(seatId)
+    }
+    return false
+  }
+
+  const okApart = backtrackApart(0, new Set([...usedSeats]))
+  if (okApart) {
+    for (const [sid, seatId] of chosenApart.entries()) {
+      const stu = studentById.get(sid)
+      if (!stu) continue
+      // tag sanity check (should already be satisfied)
+      if (!tagsMatch(stu.tags, seatTags.get(seatId))) {
+        conflicts.push(`Tag mismatch: ${getDisplayName(stu)} @ ${seatId}`)
+      }
+      seatOf.set(sid, seatId)
+      usedSeats.add(seatId)
+    }
+  } else {
+    // Can't satisfy all apart constraints simultaneously; fall back to greedy placement with conflicts recorded
+    // Greedy: seat as many apart-students as possible while avoiding adjacency; record conflicts for unplaced
+    for (const sid of apartStudents) {
+      if (seatOf.has(sid)) continue
+      const stu = studentById.get(sid)
+      if (!stu) {
+        conflicts.push(`No student data for apart student ${sid}`)
+        continue
+      }
+      const prefs = availableSeats.filter(seatId => !usedSeats.has(seatId) && tagsMatch(stu.tags, seatTags.get(seatId)))
+      let placed = false
+      for (const seatId of prefs) {
+        let violates = false
+        const partners = apartAdj.get(sid) || new Set()
+        for (const p of partners) {
+          const otherSeat = seatOf.get(p)
+          if (!otherSeat) continue
+          if (neighbors.get(seatId)?.has(otherSeat)) {
+            violates = true
+            break
+          }
+        }
+        if (!violates) {
+          seatOf.set(sid, seatId)
+          usedSeats.add(seatId)
+          placed = true
+          break
+        }
+      }
+      if (!placed) {
+        // try any seat
+        const anySeat = availableSeats.find(seatId => !usedSeats.has(seatId))
+        if (anySeat) {
+          seatOf.set(sid, anySeat)
+          usedSeats.add(anySeat)
+          conflicts.push(`Apart rule conflict for ${getDisplayName(stu)}`)
+        } else {
+          conflicts.push(`No seat available for ${getDisplayName(stu)}`)
+        }
+      }
+    }
+  }
+
+  // -----------------------------
+  // 2) Place together groups using adjacency-aware backtracking (avoid overlap with usedSeats)
+  // -----------------------------
   // Build candidate clusters for each together group (connected clusters of the needed size)
   const groupClustersArr: { group: string[]; clusters: string[][] }[] = []
   for (const group of togetherGroups) {
@@ -184,9 +335,9 @@ export function assignSeating(ctx: AssignContext, strategy: 'random' | 'alpha'):
   // Backtracking search to pick non-overlapping clusters for each group
   const chosenClustersForIdx = new Map<number, string[]>()
 
-  function backtrackPick(idx: number, used: Set<string>): boolean {
+  function backtrackPickGroups(idx: number, used: Set<string>): boolean {
     if (idx >= groupClustersArr.length) return true
-    const { group, clusters } = groupClustersArr[idx]
+    const { clusters } = groupClustersArr[idx]
 
     if (clusters.length === 0) return false
 
@@ -199,7 +350,7 @@ export function assignSeating(ctx: AssignContext, strategy: 'random' | 'alpha'):
       for (const sid of cluster) used.add(sid)
       chosenClustersForIdx.set(idx, cluster)
 
-      const ok = backtrackPick(idx + 1, used)
+      const ok = backtrackPickGroups(idx + 1, used)
       if (ok) return true
 
       // undo
@@ -210,10 +361,10 @@ export function assignSeating(ctx: AssignContext, strategy: 'random' | 'alpha'):
     return false
   }
 
-  const initialUsed = new Set<string>([...usedSeats])
-  const okPick = backtrackPick(0, initialUsed)
+  const initialUsedForGroups = new Set<string>([...usedSeats])
+  const okGroups = backtrackPickGroups(0, initialUsedForGroups)
 
-  if (okPick) {
+  if (okGroups) {
     // materialize assignments for chosen clusters
     for (let idx = 0; idx < groupClustersArr.length; idx++) {
       const group = groupClustersArr[idx].group
@@ -224,7 +375,7 @@ export function assignSeating(ctx: AssignContext, strategy: 'random' | 'alpha'):
         const sid = perm[k]
         const seatId = cluster[k]
         if (usedSeats.has(seatId)) continue
-        const stu = students.find(s => s.id === sid)
+        const stu = studentById.get(sid)
         if (!stu) continue
         const ok = tagsMatch(stu.tags, seatTags.get(seatId))
         if (!ok) conflicts.push(`Tag mismatch: ${stu ? getDisplayName(stu) : sid} @ ${seatId}`)
@@ -242,9 +393,10 @@ export function assignSeating(ctx: AssignContext, strategy: 'random' | 'alpha'):
       }
     }
   }
-  // ---------- END REPLACED BLOCK ----------
 
-  // 2) Place remaining students honoring "apart" preference when possible
+  // -----------------------------
+  // 3) Place remaining students honoring "apart" preference when possible (final fill)
+  // -----------------------------
   for (const stu of students) {
     if (seatOf.has(stu.id)) continue
     const prefs = availableSeats.filter(
@@ -274,7 +426,11 @@ export function assignSeating(ctx: AssignContext, strategy: 'random' | 'alpha'):
       if (sid) {
         seatOf.set(stu.id, sid)
         usedSeats.add(sid)
-        conflicts.push(`Apart rule conflict for ${getDisplayName(stu)}`)
+        // record a conflict only if this violates apart preference
+        const hadApartConflict = Array.from(seatOf.entries()).some(([otherId, otherSeat]) =>
+          apartPairs.has(keyPair(stu.id, otherId)) && neighbors.get(sid)?.has(otherSeat)
+        )
+        if (hadApartConflict) conflicts.push(`Apart rule conflict for ${getDisplayName(stu)}`)
       } else {
         conflicts.push(`No seat available for ${getDisplayName(stu)}`)
       }
