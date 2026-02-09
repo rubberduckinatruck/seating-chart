@@ -60,11 +60,6 @@ function buildRulesForPeriod(
   const r = savedRules[periodId] || { together: [], apart: [] }
   return { together: r.together.slice(), apart: r.apart.slice() }
 }
-
-  const next = buildBlankAssignments(template)
-  for (let i = 0; i < seats.length; i++) next[seats[i]] = ids[i] ?? null
-  return next
-}
 function alphaAssign(
   template: TemplateConfig,
   students: StudentMeta[],
