@@ -180,15 +180,18 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
   }
 
   // assignment actions
-  function randomize() {
+function randomize() {
+  const baseline = buildBlankAssignments(template)
+
   const result = assignSeating(
     {
       template,
       students,
       rules,
-      excludedDesks: excluded,
-      existing: {},
-    },
+      excluded,              // ✅ for solvers that expect ctx.excluded (Set)
+      excludedDesks: excluded, // ✅ for solvers that expect ctx.excludedDesks (Set)
+      existing: baseline,    // ✅ safer than {}
+    } as any,
     'random'
   )
 
@@ -200,6 +203,7 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
   setAssignments(result.assignments)
   persistAssignments(result.assignments)
 }
+
 
   function clearAll() {
     const next = buildBlankAssignments(template)
