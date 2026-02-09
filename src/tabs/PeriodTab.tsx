@@ -10,6 +10,7 @@ import type {
   TemplateConfig,
 } from '../lib/types'
 import { getDisplayName } from '../lib/utils'
+import { assignSeating } from '../lib/assign'  
 import PeriodSeat from '../components/PeriodSeat'
 import AssignmentToolbar from '../components/AssignmentToolbar'
 import RulesManager from '../components/RulesManager'
@@ -60,17 +61,6 @@ function buildRulesForPeriod(
   return { together: r.together.slice(), apart: r.apart.slice() }
 }
 
-function randomAssign(
-  template: TemplateConfig,
-  students: StudentMeta[],
-  excluded: Set<string>
-): Record<string, string | null> {
-  const seats = template.desks.map(d => d.id).filter(id => !excluded.has(id))
-  const ids = students.map(s => s.id)
-  for (let i = ids.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[ids[i], ids[j]] = [ids[j], ids[i]]
-  }
   const next = buildBlankAssignments(template)
   for (let i = 0; i < seats.length; i++) next[seats[i]] = ids[i] ?? null
   return next
@@ -196,10 +186,26 @@ export default function PeriodTab({ periodId }: { periodId: PeriodId }) {
 
   // assignment actions
   function randomize() {
-    const next = randomAssign(template, students, excluded)
-    setAssignments(next)
-    persistAssignments(next)
+  const result = assignSeating(
+    {
+      template,
+      students,
+      rules,
+      excludedDesks: excluded,
+      existing: {},
+    },
+    'random'
+  )
+
+  if (!result.success) {
+    alert('No valid seating arrangement satisfies the current rules.')
+    return
   }
+
+  setAssignments(result.assignments)
+  persistAssignments(result.assignments)
+}
+
   function clearAll() {
     const next = buildBlankAssignments(template)
     setAssignments(next)
